@@ -1281,6 +1281,9 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 **Common follow-ups.**
 - "Is TGI's implementation as good?" → Historically vLLM has been ahead on features (paged attention, prefix caching); TGI has caught up over time.
 
+**Common mistakes.**
+- Treating the names as describing distinct algorithms — both refer to per-iteration request admission.
+
 **References.**
 - [HuggingFace TGI](https://github.com/huggingface/text-generation-inference).
 - [vLLM project](https://github.com/vllm-project/vllm).
@@ -1560,6 +1563,9 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 **Common follow-ups.**
 - "Why integrate eval into serving?" → Continuous quality tracking; catches regressions in real time.
 
+**Common mistakes.**
+- Treating quality monitoring as separate from serving infrastructure — they should be co-located.
+
 **References.**
 - [Es et al. — "RAGAS"](https://arxiv.org/abs/2309.15217).
 
@@ -1611,6 +1617,9 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 
 **Common follow-ups.**
 - "When is offload preferred over quantization?" → Almost never in production; quantization gives much better latency at modest quality cost.
+
+**Common mistakes.**
+- Trying offload for interactive serving — latency tanks.
 
 **References.**
 - [DeepSpeed ZeRO-Inference](https://www.deepspeed.ai/inference/).
@@ -1706,6 +1715,9 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - "Performance penalty?" → Negligible with xGrammar.
 - "Quality penalty?" → Yes; sometimes meaningful if grammar is restrictive.
 
+**Common mistakes.**
+- Assuming structured output is free; FSM cost is small but quality drops with restrictive grammars.
+
 **References.**
 - [Dong et al. — "XGrammar"](https://arxiv.org/abs/2411.15100).
 
@@ -1785,6 +1797,9 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 **Common follow-ups.**
 - "Default chunk size?" → 512 tokens typical.
 - "Does it help in single-request workloads?" → No; only multi-tenant.
+
+**Common mistakes.**
+- Setting chunk size too small (overhead dominates) or disabling at high concurrency (tail-latency spikes).
 
 **References.**
 - [vLLM docs — chunked prefill](https://docs.vllm.ai/en/latest/).
