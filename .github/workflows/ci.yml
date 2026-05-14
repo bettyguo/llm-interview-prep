@@ -23,3 +23,5 @@ jobs:
         run: python tools/validate_entries.py --stats
       - name: build (check mode)
         run: python tools/build.py --check
+      - name: build site data (check mode)
+        run: python tools/build_site.py --check

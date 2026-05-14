@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>llm-interview-prep · mock interview & quiz</title>
+<meta name="description" content="Mock interview, flashcards, MCQ quiz, and search over the llm-interview-prep question bank." />
+<link rel="stylesheet" href="styles.css" />
+<!-- Markdown renderer (CDN). Site still works without it via plain-text fallback. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">●</span>
+      <span class="brand-name">llm-interview-prep</span>
+      <span class="brand-sub">mock interview &amp; quiz</span>
+    </div>
+    <nav class="modes" role="tablist" aria-label="Study modes">
+      <button class="mode-btn active" data-mode="browse"  role="tab" aria-selected="true">Browse</button>
+      <button class="mode-btn"        data-mode="flash"   role="tab" aria-selected="false">Flashcards</button>
+      <button class="mode-btn"        data-mode="mcq"     role="tab" aria-selected="false">MCQ Quiz</button>
+      <button class="mode-btn"        data-mode="mock"    role="tab" aria-selected="false">Mock Interview</button>
+      <button class="mode-btn"        data-mode="cloze"   role="tab" aria-selected="false">Cloze</button>
+    </nav>
+    <div class="topbar-right">
+      <span id="total-count" class="counter">— Qs</span>
+      <a class="repo-link" href="https://github.com/bettyguo/llm-interview-prep" target="_blank" rel="noopener">repo ↗</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============================ BROWSE MODE ============================ -->
+  <section class="view" id="view-browse">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <label class="filter-label" for="search-input">Search</label>
+        <input id="search-input" type="search" placeholder="bias-variance, attention, RLHF…" autocomplete="off" />
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Topics</div>
+        <div id="topic-filters" class="filter-list"></div>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Difficulty</div>
+        <div id="difficulty-filters" class="filter-list"></div>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Category</div>
+        <div id="category-filters" class="filter-list"></div>
+      </div>
+
+      <div class="filter-group">
+        <button id="filter-reset" class="ghost">Reset filters</button>
+      </div>
+
+      <div class="filter-group help">
+        <details>
+          <summary>About this site</summary>
+          <p>Search and study modes over the
+            <a href="https://github.com/bettyguo/llm-interview-prep" target="_blank" rel="noopener">llm-interview-prep</a>
+            question bank. All progress (mastery, MCQ stats) is stored locally in your browser.</p>
+          <p>Keyboard: <kbd>j</kbd>/<kbd>k</kbd> next/prev in flashcards, <kbd>space</kbd> to reveal,
+             <kbd>1</kbd>–<kbd>4</kbd> to rate, <kbd>/</kbd> to focus search.</p>
+        </details>
+      </div>
+    </aside>
+
+    <div class="content browse-content">
+      <div class="browse-header">
+        <h2 id="browse-heading">All questions</h2>
+        <div class="browse-controls">
+          <label for="sort-select">Sort</label>
+          <select id="sort-select">
+            <option value="topic">Topic order</option>
+            <option value="difficulty">Difficulty (easy → hard)</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+      </div>
+      <ol id="question-list" class="question-list"></ol>
+    </div>
+  </section>
+
+  <!-- ============================ FLASHCARD MODE ============================ -->
+  <section class="view hidden" id="view-flash">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <div class="filter-label">Deck</div>
+        <select id="flash-deck">
+          <option value="due">Due cards (spaced repetition)</option>
+          <option value="all">All questions</option>
+          <option value="weak">Hardest first (lowest box)</option>
+          <option value="new">Never-seen only</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Topic</div>
+        <select id="flash-topic">
+          <option value="">All topics</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Difficulty</div>
+        <select id="flash-difficulty">
+          <option value="">All</option>
+          <option value="intro">intro</option>
+          <option value="mid">mid</option>
+          <option value="senior">senior</option>
+          <option value="staff">staff</option>
+        </select>
+      </div>
+
+      <div class="filter-group stats">
+        <div class="filter-label">Progress</div>
+        <div id="flash-stats" class="stat-block"></div>
+        <button id="flash-reset" class="ghost danger">Reset all flashcard progress</button>
+      </div>
+
+      <div class="filter-group help">
+        <details open>
+          <summary>How spaced repetition works here</summary>
+          <p>Each card has a box (1–5). Rate <em>Again</em> sends it back to box 1; <em>Hard / Good / Easy</em> bump it up. Higher boxes review less often (1d → 3d → 7d → 14d → 30d). Storage is local-only.</p>
+        </details>
+      </div>
+    </aside>
+
+    <div class="content flash-content">
+      <div id="flash-empty" class="empty hidden">
+        <h2>No cards match.</h2>
+        <p>Try widening filters or switching the deck to <em>All questions</em>.</p>
+      </div>
+      <article id="flash-card" class="flashcard">
+        <div class="flash-meta">
+          <span class="pill" id="flash-topic-pill"></span>
+          <span class="pill" id="flash-diff-pill"></span>
+          <span class="pill" id="flash-cat-pill"></span>
+          <span class="pill subtle" id="flash-box-pill"></span>
+        </div>
+        <h2 class="flash-question" id="flash-question"></h2>
+        <div class="flash-front-actions">
+          <button id="flash-reveal" class="primary">Reveal answer <span class="kbd">space</span></button>
+          <button id="flash-skip" class="ghost">Skip <span class="kbd">k</span></button>
+        </div>
+        <div id="flash-answer" class="flash-answer hidden">
+          <div class="section">
+            <h3>Short answer</h3>
+            <div class="md" id="flash-short"></div>
+          </div>
+          <div class="section">
+            <h3>Why this is the answer</h3>
+            <div class="md" id="flash-expansion"></div>
+          </div>
+          <details class="section">
+            <summary>Likely follow-ups</summary>
+            <ul id="flash-followups" class="md-list"></ul>
+          </details>
+          <details class="section">
+            <summary>Common mistakes</summary>
+            <ul id="flash-mistakes" class="md-list"></ul>
+          </details>
+          <details class="section">
+            <summary id="flash-tail-label">References</summary>
+            <div class="md" id="flash-tail"></div>
+          </details>
+          <div class="rate-row">
+            <span class="rate-label">How well did you know it?</span>
+            <button class="rate again" data-rate="again">Again <span class="kbd">1</span></button>
+            <button class="rate hard"  data-rate="hard">Hard <span class="kbd">2</span></button>
+            <button class="rate good"  data-rate="good">Good <span class="kbd">3</span></button>
+            <button class="rate easy"  data-rate="easy">Easy <span class="kbd">4</span></button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ MCQ QUIZ MODE ============================ -->
+  <section class="view hidden" id="view-mcq">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <div class="filter-label">Topic</div>
+        <select id="mcq-topic"><option value="">All topics</option></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Difficulty</div>
+        <select id="mcq-difficulty">
+          <option value="">All</option>
+          <option value="intro">intro</option>
+          <option value="mid">mid</option>
+          <option value="senior">senior</option>
+          <option value="staff">staff</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Length</div>
+        <select id="mcq-length">
+          <option value="10">10 questions</option>
+          <option value="20" selected>20 questions</option>
+          <option value="40">40 questions</option>
+          <option value="0">All eligible</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button id="mcq-start" class="primary">Start quiz</button>
+      </div>
+
+      <div class="filter-group stats">
+        <div class="filter-label">Lifetime stats</div>
+        <div id="mcq-stats" class="stat-block"></div>
+        <button id="mcq-reset" class="ghost danger">Reset MCQ stats</button>
+      </div>
+
+      <div class="filter-group help">
+        <details>
+          <summary>How options are generated</summary>
+          <p>The correct answer is the first sentence of the entry's <em>Short answer</em>. The three distractors are bullets pulled from that entry's <em>Common mistakes</em> section — they're the exact failure modes interviewers listen for, so seeing them next to the right answer trains the discrimination you need.</p>
+          <p>Entries with fewer than three documented mistakes are skipped in this mode.</p>
+        </details>
+      </div>
+    </aside>
+
+    <div class="content mcq-content">
+      <div id="mcq-intro" class="mcq-panel">
+        <h2>Multiple-choice quiz</h2>
+        <p>Pick a topic and difficulty in the sidebar, then <strong>Start quiz</strong>. Each question shows the correct short answer alongside the documented common mistakes — your job is to spot the right one.</p>
+      </div>
+
+      <div id="mcq-quiz" class="mcq-panel hidden">
+        <div class="mcq-progress">
+          <span id="mcq-progress-text">Question 1 / 20</span>
+          <span id="mcq-progress-score" class="subtle"></span>
+        </div>
+        <div class="mcq-meta">
+          <span class="pill" id="mcq-topic-pill"></span>
+          <span class="pill" id="mcq-diff-pill"></span>
+        </div>
+        <h2 class="mcq-question" id="mcq-question"></h2>
+        <ol class="mcq-options" id="mcq-options"></ol>
+        <div id="mcq-feedback" class="mcq-feedback hidden">
+          <div class="md" id="mcq-explanation"></div>
+          <div class="mcq-feedback-actions">
+            <button id="mcq-next" class="primary">Next question</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="mcq-result" class="mcq-panel hidden">
+        <h2>Quiz complete</h2>
+        <div id="mcq-result-score" class="big-score"></div>
+        <div id="mcq-result-detail" class="stat-block"></div>
+        <h3>Review</h3>
+        <ol id="mcq-result-review" class="mcq-review"></ol>
+        <button id="mcq-restart" class="primary">Start another quiz</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ MOCK INTERVIEW MODE ============================ -->
+  <section class="view hidden" id="view-mock">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <div class="filter-label">Topic</div>
+        <select id="mock-topic"><option value="">All topics</option></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Difficulty</div>
+        <select id="mock-difficulty">
+          <option value="">All</option>
+          <option value="intro">intro</option>
+          <option value="mid" selected>mid</option>
+          <option value="senior">senior</option>
+          <option value="staff">staff</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Questions in this round</div>
+        <select id="mock-count">
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="12">12</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Time per question</div>
+        <select id="mock-time">
+          <option value="60">1 minute</option>
+          <option value="120" selected>2 minutes</option>
+          <option value="180">3 minutes</option>
+          <option value="300">5 minutes</option>
+          <option value="0">No timer</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button id="mock-start" class="primary">Start interview</button>
+      </div>
+
+      <div class="filter-group help">
+        <details open>
+          <summary>How this mode works</summary>
+          <p>You'll be shown questions one at a time on a countdown. Speak or jot your answer aloud as if in a loop, then reveal the model answer and rate yourself honestly (1–5). The final scorecard breaks down by topic and flags weak areas.</p>
+          <p>Behavioral questions don't have a canonical answer — they show the <em>signal</em> the interviewer is listening for. Use that as the rubric.</p>
+        </details>
+      </div>
+    </aside>
+
+    <div class="content mock-content">
+      <div id="mock-intro" class="mcq-panel">
+        <h2>Mock interview</h2>
+        <p>Configure your round in the sidebar and hit <strong>Start interview</strong>. The timer runs per question. After each question, reveal the model answer and rate your performance — the final report shows your weakest topics for follow-up.</p>
+        <div id="mock-history" class="mock-history"></div>
+      </div>
+
+      <div id="mock-stage" class="mcq-panel hidden">
+        <div class="mock-bar">
+          <div class="mock-progress-text" id="mock-progress-text">1 / 8</div>
+          <div class="mock-timer" id="mock-timer">2:00</div>
+          <button id="mock-quit" class="ghost">End round</button>
+        </div>
+        <div class="mcq-meta">
+          <span class="pill" id="mock-topic-pill"></span>
+          <span class="pill" id="mock-diff-pill"></span>
+          <span class="pill" id="mock-cat-pill"></span>
+        </div>
+        <h2 class="mcq-question" id="mock-question"></h2>
+
+        <div id="mock-answer-area">
+          <textarea id="mock-notes" placeholder="Jot your answer or main points here (saved per round, not persisted)…"></textarea>
+        </div>
+
+        <div class="mock-actions">
+          <button id="mock-reveal" class="primary">Reveal model answer</button>
+        </div>
+
+        <div id="mock-reveal-block" class="mcq-feedback hidden">
+          <div class="section">
+            <h3>Short answer</h3>
+            <div class="md" id="mock-short"></div>
+          </div>
+          <details class="section" open>
+            <summary>Why this is the answer</summary>
+            <div class="md" id="mock-expansion"></div>
+          </details>
+          <details class="section">
+            <summary>Common follow-ups (interviewer's likely next probe)</summary>
+            <ul id="mock-followups" class="md-list"></ul>
+          </details>
+          <details class="section">
+            <summary>Common mistakes (do not say these)</summary>
+            <ul id="mock-mistakes" class="md-list"></ul>
+          </details>
+          <details class="section">
+            <summary id="mock-tail-label">References</summary>
+            <div class="md" id="mock-tail"></div>
+          </details>
+          <div class="rate-row">
+            <span class="rate-label">Your self-rating:</span>
+            <button class="rate again" data-rate="1">1 — Blanked</button>
+            <button class="rate hard"  data-rate="2">2 — Shaky</button>
+            <button class="rate hard"  data-rate="3">3 — Partial</button>
+            <button class="rate good"  data-rate="4">4 — Solid</button>
+            <button class="rate easy"  data-rate="5">5 — Crisp</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="mock-report" class="mcq-panel hidden">
+        <h2>Interview report</h2>
+        <div id="mock-report-score" class="big-score"></div>
+        <div id="mock-report-detail" class="stat-block"></div>
+        <h3>Question-by-question</h3>
+        <ol id="mock-report-list" class="mcq-review"></ol>
+        <button id="mock-restart" class="primary">Start another round</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ CLOZE MODE ============================ -->
+  <section class="view hidden" id="view-cloze">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <div class="filter-label">Topic</div>
+        <select id="cloze-topic"><option value="">All topics</option></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Difficulty</div>
+        <select id="cloze-difficulty">
+          <option value="">All</option>
+          <option value="intro">intro</option>
+          <option value="mid">mid</option>
+          <option value="senior">senior</option>
+          <option value="staff">staff</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button id="cloze-next" class="primary">New cloze</button>
+      </div>
+      <div class="filter-group help">
+        <details open>
+          <summary>About cloze mode</summary>
+          <p>Key terms in the short answer are hidden. Try to recall each term before clicking it to reveal. Useful for cementing acronyms, formulas, and named concepts.</p>
+          <p>Blanks are picked from inline code (` ` ` `), bold, and noun-phrase heuristics — not perfect, but close.</p>
+        </details>
+      </div>
+    </aside>
+    <div class="content cloze-content">
+      <article id="cloze-card" class="flashcard">
+        <div class="flash-meta">
+          <span class="pill" id="cloze-topic-pill"></span>
+          <span class="pill" id="cloze-diff-pill"></span>
+        </div>
+        <h2 class="flash-question" id="cloze-question"></h2>
+        <div class="section">
+          <h3>Fill in the blanks</h3>
+          <div class="md" id="cloze-body"></div>
+        </div>
+        <div class="cloze-actions">
+          <button id="cloze-reveal-all" class="ghost">Reveal all</button>
+          <button id="cloze-next-2" class="primary">Next cloze</button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  Content under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC-BY-4.0</a>
+  · curated by <a href="https://github.com/bettyguo" target="_blank" rel="noopener">Betty Guo</a>
+  · this site is a supplementary study UI; the canonical question bank lives in the
+  <a href="https://github.com/bettyguo/llm-interview-prep" target="_blank" rel="noopener">repo</a>.
+</footer>
+
+<script src="questions.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

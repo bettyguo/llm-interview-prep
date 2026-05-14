@@ -874,3 +874,1149 @@ The fundamentals layer. Every entry conforms to the schema in [CONTRIBUTING.md](
 - [Hastie, Tibshirani, Friedman — *Elements of Statistical Learning*, §4.4](https://hastie.su.domains/ElemStatLearn/) — logistic regression.
 
 ---
+
+### Q: Interpret ROC-AUC concretely — what does AUC = 0.8 actually mean?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [auc, roc, metrics]
+
+**Short answer.** ROC-AUC is the probability that a random positive scores higher than a random negative under the model. AUC = 0.8 means: pick a random positive and a random negative; 80% of the time, the model scores the positive higher. AUC = 0.5 is random; AUC = 1.0 is perfect; AUC < 0.5 means the model is anti-predictive (flip the sign).
+
+**Expansion / why this is the answer.**
+- ROC: plot TPR vs. FPR as the threshold sweeps from 0 to 1.
+- AUC = area under that curve, equivalent to the rank statistic above (Mann-Whitney U statistic / 2).
+- Threshold-independent — useful for comparing models without picking an operating point.
+- Insensitive to class imbalance in a misleading way: under heavy imbalance, FPR's huge denominator hides false positives. Use PR-AUC instead.
+
+**Common follow-ups.**
+- "What's the relationship between ROC-AUC and the rank statistic?" → They're identical up to normalization.
+- "Why does it not depend on threshold?" → It integrates over all thresholds.
+
+**Common mistakes.**
+- Reporting AUC on a 0.1%-positive dataset and treating it as the truth.
+- Conflating ROC-AUC with PR-AUC.
+
+**References.**
+- [Fawcett — "An introduction to ROC analysis"](https://people.inf.elte.hu/kiss/13dwhdm/roc.pdf).
+- [Saito & Rehmsmeier — PR vs ROC on imbalanced data](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0118432).
+
+---
+
+### Q: What is the difference between MLE and MAP?
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [mle, map, bayesian, frequentist]
+
+**Short answer.** **MLE** (Maximum Likelihood): pick parameters maximizing `p(data | θ)`. Frequentist. **MAP** (Maximum A Posteriori): pick parameters maximizing `p(θ | data) ∝ p(data | θ) · p(θ)` — same as MLE + a prior. With a Gaussian prior, MAP ≡ MLE + L2 regularization; with a Laplace prior, MAP ≡ MLE + L1.
+
+**Expansion / why this is the answer.**
+- MLE: `θ_MLE = argmax_θ p(data | θ)`. Equivalent to minimizing negative log-likelihood (NLL).
+- MAP: `θ_MAP = argmax_θ p(data | θ) p(θ)`. NLL + prior penalty.
+- The prior on `θ` translates directly to a regularizer:
+  - Gaussian `N(0, σ²)` → L2 penalty `λ ||θ||²` with `λ = 1/(2σ²)`.
+  - Laplace `Lap(0, b)` → L1 penalty.
+- Modern DL: implicit MAP via weight decay (L2 prior). LLMs are MLE on next-token prediction during pretraining.
+- Full Bayes integrates over the posterior — much more expensive; rarely done in DL.
+
+**Common follow-ups.**
+- "When does MLE = MAP?" → Uniform prior on `θ`. Limit of MAP as the prior becomes uninformative.
+- "Why doesn't MLE work great on small data?" → Overfits; needs regularization (which is implicit MAP).
+
+**Common mistakes.**
+- Treating MAP as "the Bayesian answer" — full Bayes integrates over the posterior; MAP is a single-point estimate.
+
+**References.**
+- [Murphy — *Probabilistic Machine Learning*, §4.5](https://probml.github.io/pml-book/book1.html) — MLE/MAP.
+- [Bishop — *Pattern Recognition*, §1.2.5](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/) — Bayesian estimation.
+
+---
+
+### Q: Explain naive Bayes. Why is it called "naive"?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [naive-bayes, generative, conditional-independence]
+
+**Short answer.** Naive Bayes assumes features are conditionally independent given the class: `p(x | y) = Π p(x_i | y)`. Then by Bayes' rule, `p(y | x) ∝ p(y) · Π p(x_i | y)`. "Naive" because the conditional-independence assumption is rarely true; nonetheless it often works well, especially for high-dim sparse data (text classification with bag-of-words).
+
+**Expansion / why this is the answer.**
+- Training: estimate `p(y)` and `p(x_i | y)` from data (Bernoulli, multinomial, or Gaussian variants).
+- Prediction: pick class maximizing the joint.
+- Famous text-classification baseline; surprisingly strong despite the wrong assumption (the rank ordering of classes is often correct even when probabilities are miscalibrated).
+- Modern context: rarely used at scale; replaced by logistic regression / GBMs / DL. Still useful as a quick baseline.
+
+**Common follow-ups.**
+- "Why does it work despite the assumption being wrong?" → Domingos & Pazzani 1997: the conditional-independence assumption is most damaging to *calibrated* probabilities but barely affects the argmax decision.
+- "Multinomial vs Bernoulli naive Bayes?" → Multinomial: feature is a count (word counts). Bernoulli: feature is 0/1 (word presence).
+
+**Common mistakes.**
+- Trusting NB's predicted probabilities as calibrated (they typically aren't).
+
+**References.**
+- [Domingos & Pazzani — "On the Optimality of the Simple Bayesian Classifier"](https://link.springer.com/article/10.1023/A:1007413511361).
+
+---
+
+### Q: Walk through entropy, cross-entropy, KL divergence, and mutual information.
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [information-theory, entropy, kl, mutual-information]
+
+**Short answer.** **Entropy** `H(p) = −Σ p(x) log p(x)`: average uncertainty in `p`. **Cross-entropy** `H(p, q) = −Σ p(x) log q(x)`: average code length using `q` to encode samples from `p`. **KL divergence** `KL(p || q) = Σ p(x) log(p(x)/q(x)) = H(p, q) − H(p)`: extra cost of using `q` instead of `p`. **Mutual information** `I(X; Y) = H(X) − H(X | Y) = KL(p(x,y) || p(x)p(y))`: information shared between `X` and `Y`.
+
+**Expansion / why this is the answer.**
+- All are foundational to ML loss design.
+- Cross-entropy loss `= H(p, q)` minimized when `q = p`.
+- Minimizing cross-entropy ⇔ minimizing KL ⇔ MLE for the model distribution.
+- KL is asymmetric: `KL(p || q) ≠ KL(q || p)`. Reverse KL (used in variational inference) gives mode-seeking behavior; forward KL is mean-seeking.
+- Mutual information is symmetric: `I(X; Y) = I(Y; X)`.
+- Conditional entropy: `H(X | Y) = H(X, Y) − H(Y)`.
+
+**Common follow-ups.**
+- "Why is reverse KL used in VAEs?" → `KL(q || p)`: avoids overestimating probability mass where `p` is small.
+- "What's variational free energy?" → ELBO = `E_q[log p(x | z)] - KL(q(z|x) || p(z))`.
+
+**Common mistakes.**
+- Forgetting KL's asymmetry.
+- Saying "cross-entropy loss measures distance" — it doesn't satisfy the triangle inequality.
+
+**References.**
+- [Cover & Thomas — *Elements of Information Theory*](https://www.wiley.com/en-us/Elements+of+Information+Theory%2C+2nd+Edition-p-9780471241959) — canonical.
+- [Murphy — *Probabilistic Machine Learning*, §6](https://probml.github.io/pml-book/book1.html) — info theory for ML.
+
+---
+
+### Q: What's the difference between feature engineering, feature selection, and feature extraction?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [features, pipeline, preprocessing]
+
+**Short answer.** **Feature engineering**: hand-design new features from raw data (e.g. extract `day_of_week` from timestamp). **Feature selection**: pick a subset of existing features (e.g. drop low-variance, L1-induced sparsity, mutual-information ranking). **Feature extraction**: learn a lower-dim representation (PCA, autoencoders, embeddings).
+
+**Expansion / why this is the answer.**
+- Feature engineering is the human-in-the-loop step. Still dominant in tabular ML; deep learning has subsumed it in vision / language by learning features end-to-end.
+- Feature selection types: filter (univariate stats), wrapper (model-based, e.g. RFE), embedded (L1).
+- Feature extraction types: linear (PCA, LDA), non-linear (kernel PCA, autoencoders, learned embeddings).
+
+**Common follow-ups.**
+- "When is feature engineering most valuable?" → Tabular ML, small data, when domain expertise outpaces what a generic model can learn.
+- "Why don't LLMs need feature engineering?" → Tokens are the features; the model learns representations.
+
+**Common mistakes.**
+- Conflating selection (pick from existing) with extraction (compute new).
+
+**References.**
+- [scikit-learn — feature selection guide](https://scikit-learn.org/stable/modules/feature_selection.html).
+
+---
+
+### Q: When does Bayesian optimization beat random search for hyperparameter tuning?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [hyperparameter-tuning, bayesian-optimization, search]
+
+**Short answer.** Bayesian optimization (with a Gaussian-process or tree-Parzen surrogate) wins when each evaluation is *expensive* and the search space is *modest* (≤ 10–20 dims). It uses past evaluations to model the loss landscape and propose the next trial more informatively. For very large or non-smooth search spaces, or when evaluations are cheap, random search wins (Bergstra & Bengio 2012). For massively parallel runs, Hyperband / ASHA dominate.
+
+**Expansion / why this is the answer.**
+- **Random search**: simple, embarrassingly parallel, surprisingly strong baseline.
+- **Grid search**: dense in low dims; combinatorially expensive in high dims.
+- **Bayesian optimization** (BO): fit a surrogate to seen `(hyperparams, val_loss)` points; the acquisition function (expected improvement, UCB) suggests the next point. Sequential by design.
+- **Hyperband / ASHA**: early-stopping unpromising trials. Good when training is iterative.
+- **PBT** (Population-Based Training): evolves a population during training.
+- **Modern picks**: Optuna (TPE-based BO + pruning), Ray Tune (ASHA + BO + PBT).
+
+**Common follow-ups.**
+- "Why doesn't BO work in 100+ dim search spaces?" → GP scales `O(N³)`; high-dim posterior modeling breaks down; random search becomes competitive.
+- "What's TPE?" → Tree-structured Parzen Estimator — Bayesian-optimization variant used in Optuna.
+
+**Common mistakes.**
+- Defaulting to grid search in high-dim spaces.
+- Using BO with very fast evaluations (parallelism + random wins).
+
+**References.**
+- [Bergstra & Bengio — "Random Search for Hyper-Parameter Optimization"](https://www.jmlr.org/papers/v13/bergstra12a.html).
+- [Li et al. — "Hyperband"](https://arxiv.org/abs/1603.06560).
+- [Optuna docs](https://optuna.org/).
+
+---
+
+### Q: What is SHAP, and how does it improve over feature importance?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [shap, interpretability, feature-attribution]
+
+**Short answer.** SHAP (SHapley Additive exPlanations, Lundberg & Lee 2017) assigns each feature an attribution for a *specific prediction* based on Shapley values from cooperative game theory. Unique among feature-attribution methods in satisfying local accuracy, missingness, and consistency. Better than gain / permutation importance because it gives *per-instance* attributions (instead of just global), is consistent across model changes, and has theoretical grounding.
+
+**Expansion / why this is the answer.**
+- **Global feature importance** (gain in GBMs, permutation importance): aggregate signal across the dataset. Hides per-instance variation.
+- **SHAP**: for prediction `f(x)`, compute `φ_i = Σ_{S} (|S|! (n-|S|-1)!/n!) [f(S ∪ {i}) − f(S)]` over all subsets — the average marginal contribution of feature `i`.
+- Computationally heavy in general (`O(2^n)`); TreeSHAP exploits tree structure for polynomial-time exact SHAP on tree ensembles.
+- Sum of SHAP values for a prediction = `f(x) − E[f]` (local accuracy).
+- **Visualizations**: waterfall plot per prediction, beeswarm plot for summary.
+
+**Common follow-ups.**
+- "Why is SHAP slow for non-tree models?" → Combinatorial in number of features; sampling approximations help (KernelSHAP).
+- "What's the difference between SHAP and LIME?" → LIME fits a local linear model around the prediction; SHAP uses Shapley values; SHAP has stronger theoretical guarantees and consistency.
+
+**Common mistakes.**
+- Trusting SHAP for causality — it's attribution within the model, not causal effect on the world.
+- Using SHAP from the wrong baseline (the "average" matters).
+
+**References.**
+- [Lundberg & Lee — "A Unified Approach to Interpreting Model Predictions" (SHAP)](https://arxiv.org/abs/1705.07874).
+- [Lundberg et al. — "TreeSHAP"](https://arxiv.org/abs/1802.03888).
+
+---
+
+### Q: What is the bootstrap, and what is it used for?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [bootstrap, resampling, confidence-intervals]
+
+**Short answer.** The bootstrap resamples the dataset with replacement to estimate the sampling distribution of a statistic — typically a confidence interval or standard error. Effron (1979). Useful when you don't have a clean analytic CI: medians, complex metrics like AUC, model performance numbers, etc.
+
+**Expansion / why this is the answer.**
+- Procedure: draw `B` resamples (e.g. `B = 1000`) of size `N` with replacement; compute the statistic on each; the empirical distribution of those `B` statistics approximates the sampling distribution.
+- Confidence interval: percentile method (2.5 and 97.5 quantiles for 95% CI).
+- Standard error: std of the bootstrap distribution.
+- Uses in ML:
+  - CI on metric (AUC, accuracy, RMSE).
+  - Bagging (bootstrap aggregation; Random Forest uses bootstrap samples).
+  - Out-of-bag (OOB) estimate of generalization error.
+- Limits: assumes the empirical distribution approximates the true distribution; fails for heavy-tailed or boundary-near data.
+
+**Common follow-ups.**
+- "How many bootstrap samples?" → 1000+ for stable CI; 10k for tight tails.
+- "What's the OOB estimate in Random Forest?" → For each tree, evaluate on the samples not in its bootstrap; average across trees.
+
+**Common mistakes.**
+- Bootstrapping without replacement (defeats the purpose).
+- Reporting a bootstrap CI that's too narrow because `B` was too small.
+
+**References.**
+- [Efron & Tibshirani — *An Introduction to the Bootstrap*](https://www.routledge.com/An-Introduction-to-the-Bootstrap/Efron-Tibshirani/p/book/9780412042317).
+
+---
+
+### Q: Multi-armed bandits — Thompson sampling vs UCB.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [bandits, thompson, ucb, exploration]
+
+**Short answer.** Multi-armed bandit: trade off exploring arms with uncertain reward vs. exploiting the current best. **UCB** (Upper Confidence Bound): pick the arm with highest `mean + c·√(log(t)/n_arm)` — deterministic, optimistic. **Thompson sampling**: sample a parameter from each arm's posterior; pick the arm with the best sample — stochastic, Bayesian. Both achieve `O(log T)` regret; Thompson is empirically often simpler and more robust.
+
+**Expansion / why this is the answer.**
+- Standard bandit: `K` arms; each pull gives a stochastic reward; maximize cumulative reward over `T` pulls.
+- Regret: `T · μ* − Σ_t μ_{a_t}` (gap to playing the optimal arm).
+- **UCB1**: `arm_t = argmax_a (μ̂_a + √(2 log t / n_a))`.
+- **Thompson sampling**: with conjugate prior (e.g. Beta-Bernoulli for binary rewards), sample `θ_a ∼ Beta(α_a, β_a)`, pick `argmax θ_a`, update with observed reward.
+- **Contextual bandits**: arm choice conditions on a context vector (used in recsys, ads); linear (LinUCB), neural-network variants.
+- **Use cases in ML**: A/B testing with adaptive allocation, recsys cold-start, prompt selection.
+
+**Common follow-ups.**
+- "When does Thompson beat UCB in practice?" → Often comparable; Thompson has lower-variance regret and is easier to extend (LinTS, NeuralTS).
+- "Why is Thompson Bayesian and UCB frequentist?" → TS samples from a posterior; UCB constructs a frequentist upper confidence bound.
+
+**Common mistakes.**
+- Treating bandits as full RL — they have no state transitions.
+- Forgetting the exploration term decays over time.
+
+**References.**
+- [Auer, Cesa-Bianchi, Fischer — "Finite-time Analysis of the Multiarmed Bandit Problem" (UCB1)](https://link.springer.com/article/10.1023/A:1013689704352).
+- [Russo et al. — "A Tutorial on Thompson Sampling"](https://arxiv.org/abs/1707.02038).
+
+---
+
+### Q: Concept drift vs data drift vs label drift — definitions and detection.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [drift, monitoring, production-ml]
+
+**Short answer.** **Data drift** (covariate shift): `p(X)` changes; same `p(Y|X)`. Inputs shift but the relationship is stable. **Label drift** (prior shift): `p(Y)` changes; e.g., positive rate rises. **Concept drift**: `p(Y|X)` changes; the underlying relationship itself shifts. All three degrade model performance; you detect with population stability index (PSI), KS test, or comparing per-segment metrics over time.
+
+**Expansion / why this is the answer.**
+- **Data drift** examples: new user segments arrive; seasonality changes; product mix shifts.
+- **Label drift** examples: pandemic causes fraud-rate spike; election cycle shifts conversion rates.
+- **Concept drift** examples: user preferences shift; a new product category emerges that the model never saw.
+- **Detection**:
+  - Population Stability Index (PSI): per-feature binning, compare distributions; threshold (e.g. 0.2 = major shift).
+  - KS test for continuous, chi-square for categorical.
+  - Statistical-process control on input distributions.
+  - Performance monitoring: compare per-period metrics.
+- **Response**:
+  - Data drift: usually retrain on recent data.
+  - Label drift: recalibrate (Platt) or retrain.
+  - Concept drift: retrain; possibly redesign features.
+
+**Common follow-ups.**
+- "When can data drift not cause performance degradation?" → If the new region is in-distribution and the model generalizes; rare but possible.
+- "What's covariate shift?" → Synonym for data drift.
+
+**Common mistakes.**
+- Conflating these — they require different responses.
+- Only monitoring outputs (you miss input shifts before they cause errors).
+
+**References.**
+- [Quionero-Candela et al. — *Dataset Shift in Machine Learning*](https://mitpress.mit.edu/9780262170055/dataset-shift-in-machine-learning/) — canonical reference.
+- [Lu et al. — "Learning under Concept Drift: A Review"](https://arxiv.org/abs/1907.10202).
+
+---
+
+### Q: What is online learning, and when does it beat batch learning?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [online-learning, streaming, ftrl]
+
+**Short answer.** Online learning updates the model one example (or mini-batch) at a time as data arrives, rather than retraining from scratch. Beats batch learning when (a) data arrives in a stream, (b) the underlying distribution drifts and recency matters, (c) compute can't fit a full retrain. Classic algorithms: FTRL (used by Google for ad CTR), online SGD, passive-aggressive.
+
+**Expansion / why this is the answer.**
+- Online learning vs. incremental learning vs. continual learning:
+  - **Online**: one example at a time; can't revisit data.
+  - **Incremental**: update on new data; may revisit old.
+  - **Continual**: update across tasks over time; mitigate forgetting.
+- **FTRL-Proximal** (McMahan et al. 2013): per-coordinate adaptive LR; widely used for ad CTR.
+- **Online SGD**: simplest form.
+- **Passive-Aggressive**: update only when current example is misclassified.
+- **Modern context**:
+  - Production ML systems do hourly-to-daily batch retrains rather than true online.
+  - Pure online learning is in niches (real-time recsys, ad CTR).
+  - LLMs: not online-learned in the typical sense; pretrain + periodic fine-tune.
+
+**Common follow-ups.**
+- "Why isn't pure online learning more common?" → Stability concerns; one bad example can drift the model; harder to debug.
+- "What's the regret of online learning?" → A standard analysis bound; OGD achieves `O(√T)` regret.
+
+**Common mistakes.**
+- Confusing online learning (data) with online inference (deployment).
+
+**References.**
+- [McMahan et al. — "Ad Click Prediction: a View from the Trenches"](https://research.google/pubs/pub41159/) — FTRL.
+- [Shalev-Shwartz — "Online Learning and Online Convex Optimization"](https://arxiv.org/abs/1909.05207) — survey.
+
+---
+
+### Q: Demographic parity vs equalized odds vs calibration — which fairness metric, when?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [fairness, equalized-odds, demographic-parity]
+
+**Short answer.** **Demographic parity**: equal positive-prediction rate across groups. **Equalized odds**: equal TPR and FPR across groups. **Calibration**: predicted probabilities mean the same thing across groups. They're mutually incompatible (Chouldechova 2017; Kleinberg et al. 2017) when base rates differ. The right choice depends on the use case — there's no universally "right" fairness metric.
+
+**Expansion / why this is the answer.**
+- **Demographic parity**: `P(ŷ=1 | A=0) = P(ŷ=1 | A=1)`. Strong condition; ignores label.
+- **Equalized odds**: `P(ŷ=1 | y, A=0) = P(ŷ=1 | y, A=1)` for `y ∈ {0,1}` — equal TPR and FPR.
+- **Calibration**: `P(y=1 | ŷ=p, A) = p` for all groups `A`.
+- **Impossibility**: if base rates `P(y=1 | A)` differ between groups, you can't satisfy all three simultaneously (Chouldechova 2017).
+- **Context determines choice**:
+  - Lending / hiring: equalized odds often preferred (don't underserve qualified people in any group).
+  - Criminal-risk prediction (COMPAS): calibrated by group, but FPR differs by race — fundamental tension.
+  - Marketing: demographic parity may be relevant for inclusion goals.
+- **Mitigation**:
+  - Re-weighting training data.
+  - Post-hoc threshold adjustment per group (where legally permitted).
+  - In-processing constraints (regularization toward fairness).
+- **Real world**:
+  - "Disparate treatment" vs. "disparate impact" — different legal frames.
+  - Many uses must satisfy domain-specific regulations (ECOA, GDPR, EU AI Act).
+
+**Common follow-ups.**
+- "What's the COMPAS controversy?" → ProPublica showed COMPAS had different FPR by race; Northpointe responded that it's calibrated by race. Both correct — the impossibility theorem.
+- "Is there a 'fair' classifier?" → No general one; the answer depends on what notion of fairness is operative for the domain.
+
+**Common mistakes.**
+- Treating fairness as a single technical metric.
+- Forgetting the impossibility result.
+
+**References.**
+- [Chouldechova — "Fair Prediction with Disparate Impact"](https://arxiv.org/abs/1610.07524).
+- [Kleinberg, Mullainathan, Raghavan — "Inherent Trade-offs in the Fair Determination of Risk Scores"](https://arxiv.org/abs/1609.05807).
+
+---
+
+### Q: What's differential privacy, and how would you train an LLM with it?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [differential-privacy, dp-sgd, privacy]
+
+**Short answer.** Differential Privacy (DP) bounds how much one training example can change the model's output distribution — formalized as the `(ε, δ)`-DP guarantee. **DP-SGD** (Abadi et al. 2016): per-example gradient clipping + Gaussian noise injection. Trades off privacy budget against utility. For LLMs at frontier scale, end-to-end DP training is rarely done (utility costs are high); selective DP fine-tuning is more common.
+
+**Expansion / why this is the answer.**
+- **Definition**: a mechanism `M` is `(ε, δ)`-DP if for adjacent datasets `D, D'` (differing in one record), `P(M(D) ∈ S) ≤ e^ε · P(M(D') ∈ S) + δ`.
+- **DP-SGD**:
+  - Compute per-example gradients.
+  - Clip each gradient to norm ≤ `C`.
+  - Sum and add Gaussian noise `N(0, σ² C² I)`.
+  - Step.
+- **Privacy accounting**: each step consumes privacy budget; total `ε` grows with steps (composition theorems — moments accountant for tight bounds).
+- **Practical for LLMs**:
+  - Full pretraining with DP is expensive (utility-budget tradeoff is hard).
+  - DP-SFT (fine-tune with DP) is more common, especially for medical / legal data.
+  - **Private prediction** (DP at inference time): output noisy predictions; rare for LLMs.
+- **Membership inference attacks** quantify how much a model leaks about its training data; DP mitigates this.
+- **Modern context**: Apple's on-device privacy, federated-learning + DP combinations.
+
+**Common follow-ups.**
+- "What's ε in practice?" → `ε ≤ 1` strong; `ε ≤ 10` weak. Domain-dependent.
+- "Can you DP-tune a public model?" → The pretraining isn't DP, so the model's parametric memory leaks. DP-fine-tune adds privacy *for the fine-tune data*, not for pretraining.
+
+**Common mistakes.**
+- Treating DP as binary; it's a continuous budget.
+- Forgetting that DP bounds privacy *of the algorithm*, not the deployment.
+
+**References.**
+- [Abadi et al. — "Deep Learning with Differential Privacy"](https://arxiv.org/abs/1607.00133) — DP-SGD.
+- [Dwork & Roth — *The Algorithmic Foundations of Differential Privacy*](https://www.cis.upenn.edu/~aaroth/Papers/privacybook.pdf) — canonical text.
+
+---
+
+### Q: What is active learning, and when does it help?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [active-learning, sample-efficiency, labeling]
+
+**Short answer.** Active learning: the model selects the most informative unlabeled examples for a human to label. Beats random sampling when (a) labeling is expensive but data is abundant, and (b) the model's uncertainty is well-calibrated. Common acquisition criteria: highest model uncertainty, query-by-committee disagreement, expected model change. Gains plateau after a few thousand labels; rarely transformative for modern LLM pretraining (the abundance of unlabeled text dominates).
+
+**Expansion / why this is the answer.**
+- The classical setup: model trained on small `L`; large unlabeled pool `U`; pick examples from `U` for the human to label.
+- **Acquisition functions**:
+  - **Uncertainty sampling**: query the example the model is most uncertain on (highest entropy).
+  - **Query-by-committee**: train an ensemble; query where they disagree.
+  - **Expected model change**: query where adding the label would change the model most.
+  - **BALD**: Bayesian Active Learning by Disagreement; based on mutual information.
+- **Modern context**:
+  - Annotation tools (Snorkel, Label Studio) implement active-learning loops.
+  - For LLM fine-tuning: active learning can pick the most informative SFT data.
+  - For LLM eval-set construction: active labeling of the hardest examples.
+
+**Common follow-ups.**
+- "Why does active learning sometimes fail?" → Uncertain predictions are sometimes uninformative (noisy regions); the model selects "garbage."
+- "BALD vs. uncertainty sampling?" → BALD captures model-vs-data uncertainty separation; better than naive entropy.
+
+**Common mistakes.**
+- Trusting model uncertainty before the model is calibrated.
+
+**References.**
+- [Settles — "Active Learning Literature Survey"](https://burrsettles.com/pub/settles.activelearning.pdf).
+
+---
+
+### Q: Compare semi-supervised learning approaches.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [semi-supervised, pseudo-labels, fixmatch]
+
+**Short answer.** Semi-supervised learning uses both labeled and unlabeled data. Common methods: **pseudo-labeling** (use model's confident predictions as labels), **consistency regularization** (encourage same prediction on augmented variants of unlabeled data), **co-training** (two views of data train two models that supervise each other), **graph-based** (label propagation on a graph). Modern: **FixMatch** (Sohn et al. 2020) combines pseudo-labels + consistency for strong vision SSL. SSL also fundamentally underlies LLM self-supervised pretraining.
+
+**Expansion / why this is the answer.**
+- **Pseudo-labeling** (Lee 2013): train on labeled, predict on unlabeled, keep predictions with high confidence as new labels, retrain.
+- **Consistency regularization** (Π-model, Mean Teacher, MixMatch, FixMatch): augment unlabeled data; loss = MSE/KL between predictions on different augmentations.
+- **MixMatch / FixMatch**: combine these; strong-augmentation pseudo-labels supervise weak-augmentation predictions.
+- **Graph-based** (label propagation): build a similarity graph; propagate labels from labeled to unlabeled along edges.
+- **Self-supervised pretraining + fine-tune**: arguably the dominant modern SSL — pretrain on huge unlabeled data, fine-tune on small labeled. LLM pretraining is the headline example.
+
+**Common follow-ups.**
+- "When does pseudo-labeling fail?" → Confirmation bias: model amplifies its own errors. Mitigate with confidence thresholding and ensembles.
+- "Is LLM pretraining 'semi-supervised'?" → Technically self-supervised; sometimes lumped in.
+
+**Common mistakes.**
+- Treating semi-supervised and self-supervised as identical.
+
+**References.**
+- [Sohn et al. — "FixMatch"](https://arxiv.org/abs/2001.07685).
+- [Berthelot et al. — "MixMatch"](https://arxiv.org/abs/1905.02249).
+- [Lee — "Pseudo-Label"](https://www.researchgate.net/publication/280581078_Pseudo-Label_The_Simple_and_Efficient_Semi-Supervised_Learning_Method_for_Deep_Neural_Networks).
+
+---
+
+### Q: Confidence interval vs prediction interval — what's the difference?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [intervals, uncertainty, regression]
+
+**Short answer.** **Confidence interval (CI)**: range likely to contain a *population parameter* (e.g., the true mean). Reflects sampling uncertainty. **Prediction interval (PI)**: range likely to contain a *new individual observation*. Reflects sampling + irreducible noise. PIs are always wider than CIs because they include the per-observation noise term.
+
+**Expansion / why this is the answer.**
+- For a regression mean prediction at `x*`:
+  - 95% CI for `E[Y | x*]`: `ŷ ± 1.96 · SE(ŷ)`.
+  - 95% PI for `Y_new(x*)`: `ŷ ± 1.96 · √(SE(ŷ)² + σ²)`, where `σ²` is residual variance.
+- The `σ²` term is irreducible noise; CI ignores it.
+- For ML: bootstrap can give a CI; quantile regression gives a PI.
+
+**Common follow-ups.**
+- "How would you build a PI from a neural net?" → Quantile regression heads; conformal prediction.
+- "Conformal prediction?" → Distribution-free PIs with finite-sample coverage guarantees (Vovk et al.; modern: Romano et al. 2019 conformal quantile regression).
+
+**Common mistakes.**
+- Reporting a 95% CI as if it covers individual predictions.
+
+**References.**
+- [Angelopoulos & Bates — "A Gentle Introduction to Conformal Prediction"](https://arxiv.org/abs/2107.07511).
+
+---
+
+### Q: When does ensembling help in deep learning, and what are the modern alternatives?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [ensembling, deep-ensembles, snapshot, dropout]
+
+**Short answer.** Ensembling reduces variance and improves calibration. **Deep ensembles**: train N independent models with different seeds; average predictions. Strong, reliably improves AUC / log-loss / calibration. **Snapshot ensembles**: collect checkpoints at cyclical LR minima from one training run — much cheaper but weaker. **MC Dropout** at inference: cheap Bayesian-ish ensemble. **Self-distillation**: distill the ensemble into one model for cheap inference. At scale (LLMs), full deep ensembles are prohibitive; alternatives dominate.
+
+**Expansion / why this is the answer.**
+- **Why ensembles help**: independent errors average out; variance reduction.
+- **Deep ensembles** (Lakshminarayanan et al. 2017): the strongest baseline for prediction-uncertainty and out-of-distribution detection.
+- **Snapshot ensembles** (Huang et al. 2017): cyclic LR; collect checkpoints at the bottom of each cycle.
+- **Stochastic Weight Averaging (SWA)** (Izmailov et al. 2018): average weights along the SGD trajectory; surprisingly improves generalization without ensemble cost at inference.
+- **MC Dropout** (Gal & Ghahramani 2016): keep dropout on at inference; average many forward passes.
+- **For LLMs**:
+  - Full ensembling is too expensive.
+  - Self-consistency at decoding (sample multiple chains-of-thought, majority-vote) is the analog.
+  - Multi-temperature sampling + aggregation.
+
+**Common follow-ups.**
+- "When does ensembling not help?" → Already well-calibrated, low-variance models. Or when ensembled models are too similar (correlated errors).
+- "What's the trade-off vs. just training one bigger model?" → A bigger model is often comparable; ensembling is a way to get the benefit when compute can't be reallocated to scaling.
+
+**Common mistakes.**
+- Averaging ensemble *probabilities* but reporting *predictions* — argmax over averaged probs is the right way.
+
+**References.**
+- [Lakshminarayanan et al. — "Deep Ensembles"](https://arxiv.org/abs/1612.01474).
+- [Huang et al. — "Snapshot Ensembles"](https://arxiv.org/abs/1704.00109).
+- [Izmailov et al. — "SWA"](https://arxiv.org/abs/1803.05407).
+
+---
+
+### Q: What's the difference between transfer learning, fine-tuning, and domain adaptation?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [transfer-learning, fine-tuning, domain-adaptation]
+
+**Short answer.** **Transfer learning**: take a pretrained model and apply it (possibly with fine-tuning) to a new task or domain. The umbrella term. **Fine-tuning**: a specific transfer-learning method — update some/all parameters on the new task. **Domain adaptation**: a sub-case of transfer learning where the *task* stays the same but the *input distribution* changes (English → German sentiment; web text → medical text).
+
+**Expansion / why this is the answer.**
+- **Transfer learning** is the broad concept; many methods underneath.
+- **Methods**:
+  - Linear probing: freeze backbone, train a small head.
+  - Fine-tuning: update some/all weights.
+  - PEFT (LoRA): low-rank update.
+  - Prompting / in-context: no weight changes.
+- **Domain adaptation** specifically: task = same; data distribution = different.
+  - **Unsupervised DA**: labeled source, unlabeled target.
+  - **Adversarial DA** (DANN, Ganin 2016): train a feature representation indistinguishable across domains.
+- **Modern LLM use**: pretrain on web → SFT on chat → DPO on preferences = a chain of transfer steps. Each is "transfer" in the broad sense.
+
+**Common follow-ups.**
+- "What's negative transfer?" → When transferring hurts performance; the source and target are too different.
+- "When is linear probing enough vs. full fine-tune?" → Linear probing for diagnostic / quick baseline; fine-tune when the task needs new behaviors.
+
+**Common mistakes.**
+- Treating fine-tuning as the only transfer-learning method.
+
+**References.**
+- [Pan & Yang — "A Survey on Transfer Learning"](https://www.cse.ust.hk/~qyang/Docs/2009/tkde_transfer_learning.pdf).
+- [Ganin et al. — "DANN"](https://arxiv.org/abs/1409.7495) — adversarial DA.
+
+---
+
+### Q: What's the difference between zero-shot and few-shot learning vs. zero-shot and few-shot evaluation?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [few-shot, zero-shot, evaluation]
+
+**Short answer.** "Zero-/few-shot **learning**" originally meant training a model to generalize to unseen classes with zero or few examples (Lampert et al. 2009; metric-learning prototypes). "Zero-/few-shot **evaluation**" (the 2020+ LLM sense) means prompting an LLM with zero or `k` in-context examples and measuring performance. Different things; the LLM-era usage has dominated, but the older meaning still appears in vision papers.
+
+**Expansion / why this is the answer.**
+- **Classical few-shot learning** (vision):
+  - Train on `N` base classes; at test time, see a few examples of new classes; classify new examples in those classes.
+  - Methods: prototypical networks, MAML (meta-learning).
+- **LLM zero/few-shot evaluation** (Brown et al. 2020):
+  - Take a pretrained LLM (no task-specific training).
+  - Zero-shot: just the task instruction.
+  - Few-shot: instruction + `k` `(input, output)` examples in the prompt.
+- **In-context learning**: the LLM does few-shot via in-context examples — no weight updates.
+
+**Common follow-ups.**
+- "Why is the LLM zero-shot still surprising?" → Because the model can perform tasks it wasn't explicitly trained on, just from the prompt.
+- "Connection to prompt engineering?" → Prompt engineering is mostly few-shot / zero-shot with instruction tuning.
+
+**Common mistakes.**
+- Confusing the two senses; some papers ambiguous.
+
+**References.**
+- [Brown et al. — GPT-3](https://arxiv.org/abs/2005.14165) — LLM few-shot framework.
+- [Lampert et al. — "Learning to Detect Unseen Object Classes by Between-Class Attribute Transfer"](https://www.di.ens.fr/~lampert/papers/2009-cvpr-lampert.pdf) — classical.
+
+---
+
+### Q: What is meta-learning / "learning to learn"?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [meta-learning, maml, few-shot]
+
+**Short answer.** Meta-learning trains a model on a *distribution of tasks* so that it can quickly adapt to a new task with few examples. The headline algorithm is **MAML** (Finn et al. 2017): the meta-objective is "after one gradient step on a new task, perform well." Other approaches: prototypical networks (Snell et al. 2017), Reptile, ANIL. Modern LLM in-context learning is sometimes framed as implicit meta-learning emerging from pretraining.
+
+**Expansion / why this is the answer.**
+- The setup: tasks `T_1, T_2, ...` sampled from a distribution. Each task has its own `(D_train, D_test)`.
+- **MAML**: meta-train so that `θ - α∇_θ L(θ, D_train_τ)` performs well on `D_test_τ` after one gradient step.
+- **Prototypical networks**: learn a feature embedding such that "prototype" (mean) of each class in the support set classifies the query set.
+- **Modern relevance**:
+  - Vision few-shot benchmarks (miniImageNet, Omniglot).
+  - LLM in-context learning is *not* explicit meta-learning, but the behavior has parallels; some research formalizes the connection (von Oswald et al. 2023).
+
+**Common follow-ups.**
+- "Why isn't MAML widely used now?" → LLMs and pretrained foundation models have largely replaced explicit meta-learning by providing strong base features.
+
+**Common mistakes.**
+- Calling all transfer learning "meta-learning" — meta-learning trains *for* fast adaptation; transfer learning just *uses* a pretrained model.
+
+**References.**
+- [Finn et al. — "MAML"](https://arxiv.org/abs/1703.03400).
+- [Snell et al. — "Prototypical Networks"](https://arxiv.org/abs/1703.05175).
+
+---
+
+### Q: What is curriculum / self-paced learning, and when does it help in DL?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [curriculum-learning, self-paced]
+
+**Short answer.** Curriculum learning trains on easy examples first, gradually adding harder ones. Self-paced learning lets the model itself decide example difficulty as it trains. For deep learning on classical supervised tasks, gains are modest and inconsistent. For specific settings — reasoning fine-tuning (math), RL-from-easy-to-hard, long-context training — curriculum can substantially help.
+
+**Expansion / why this is the answer.**
+- See also T3's curriculum-learning entry for the LLM-specific context.
+- Empirical: works for some tasks (sequence learning, RL with sparse rewards) more than others (image classification).
+- **Self-paced** (Kumar et al. 2010): model loss determines what's "easy"; weight examples by current model performance.
+- **Modern LLM use**:
+  - Math fine-tuning: easy problems first; harder problems later (DeepSeek-Math).
+  - Long-context training: start with shorter contexts; extend.
+- The Bengio et al. 2009 paper made the case; empirical support is mixed.
+
+**Common follow-ups.**
+- "Why doesn't it help much in image classification?" → ImageNet samples are reasonably i.i.d.; curriculum effects average out.
+- "What's a good signal for 'easy'?" → Current loss, gradient norm, human-curated difficulty.
+
+**Common mistakes.**
+- Treating curriculum as universally helpful.
+
+**References.**
+- [Bengio et al. — "Curriculum Learning"](https://dl.acm.org/doi/10.1145/1553374.1553380).
+- [Kumar et al. — "Self-Paced Learning"](https://papers.nips.cc/paper/2010/hash/e57c6b956a6521b28495f2886ca0977a-Abstract.html).
+
+---
+
+### Q: What is the universal approximation theorem, and does it actually matter in practice?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [universal-approximation, theory, expressiveness]
+
+**Short answer.** A 2-layer feedforward network with enough hidden units and a non-linear activation can approximate any continuous function arbitrarily well (Cybenko 1989; Hornik 1991). In practice, **it matters less than people think**: the theorem says nothing about (a) how many units are needed, (b) whether you can find the weights with gradient descent, (c) generalization. Depth, optimization landscape, and inductive biases matter more than expressiveness.
+
+**Expansion / why this is the answer.**
+- The theorem is an existence proof; it doesn't tell you how to construct or train.
+- Modern deep learning's empirical success comes from:
+  - **Depth** vs. width: deep networks express certain functions exponentially more compactly than shallow.
+  - **Optimization**: SGD finds good minima even though the loss landscape is non-convex (lottery-ticket, mode connectivity).
+  - **Inductive bias**: convolutions (translation equivariance), attention (relational), positional encodings (sequence).
+- **What it does explain**: you don't need exotic architectures to achieve approximation; standard NNs are enough.
+- **What it doesn't explain**: why deep networks generalize so well despite huge parameter counts.
+
+**Common follow-ups.**
+- "Why depth, then?" → Some functions need exponentially many shallow units but few deep ones (Telgarsky 2016).
+- "Does this apply to transformers?" → Transformers are also universal approximators with some caveats (Yun et al. 2020).
+
+**Common mistakes.**
+- Citing universal approximation to argue "deep nets work because they're universal" — every nontrivial model class is universal.
+
+**References.**
+- [Cybenko — "Approximation by Superpositions of a Sigmoidal Function"](https://link.springer.com/article/10.1007/BF02551274).
+- [Telgarsky — "Benefits of depth in neural networks"](https://arxiv.org/abs/1602.04485).
+
+---
+
+### Q: What is the lottery-ticket hypothesis?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [lottery-ticket, pruning, sparsity]
+
+**Short answer.** Frankle & Carbin (2019): inside a randomly-initialized dense network, there exists a sparse subnetwork ("winning ticket") that — *if trained in isolation from its original initialization* — matches the dense network's performance. Demonstrated by iterative magnitude pruning + re-rewinding. Suggests over-parameterization helps find good subnetworks at init, not just for expressiveness. Mixed replication at very large scale.
+
+**Expansion / why this is the answer.**
+- Procedure:
+  1. Train a dense network.
+  2. Prune the smallest-magnitude weights (e.g. 20%).
+  3. **Rewind** the remaining weights to their original initialization.
+  4. Retrain on the same data.
+  5. Iterate.
+- Winning ticket: the pruned subnetwork at the original init, retrained, matches the dense model.
+- Implications:
+  - Networks are over-parameterized; only a sparse subnetwork "matters."
+  - Suggests dense training helps because it gives many candidate winning tickets in parallel.
+- Caveats:
+  - At very large scale (ImageNet ResNet, LLM), the "rewind to original init" version breaks; later work uses "rewind to early checkpoint."
+  - Not consistently a path to faster training (the pruning process itself is expensive).
+
+**Common follow-ups.**
+- "Is this related to neural-network pruning?" → Same family; pruning typically prunes a trained network; lottery-ticket goes further by re-rewinding.
+- "Practical takeaway?" → For deploying smaller models, pruning + fine-tune. Lottery-ticket is more a scientific finding than a recipe.
+
+**Common mistakes.**
+- Conflating lottery-ticket with standard pruning.
+
+**References.**
+- [Frankle & Carbin — "The Lottery Ticket Hypothesis"](https://arxiv.org/abs/1803.03635).
+
+---
+
+### Q: What's Goodhart's Law in ML, and where have you seen it?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [goodhart, metrics, reward-hacking]
+
+**Short answer.** "When a measure becomes a target, it ceases to be a good measure." In ML: optimizing for a proxy metric (test accuracy, reward model score, click-through rate) drifts the model toward gaming the metric rather than improving the underlying capability. Examples: reward hacking in RLHF, benchmark contamination, RLAIF length bias, recsys engagement-bait. Mitigation: monitor multiple metrics, hold out gold-set checks, periodically audit.
+
+**Expansion / why this is the answer.**
+- **Original framing**: economic theory; Goodhart 1975.
+- **ML examples**:
+  - Reward hacking in RL: policy maxes the reward model, gets verbose/sycophantic.
+  - Benchmark over-fitting: model trained explicitly on benchmark questions or paraphrases.
+  - Engagement metrics: recsys learns outrage drives clicks.
+  - Code agents that delete tests to make them "pass."
+- **Mitigations**:
+  - Multi-metric optimization with guardrails.
+  - Held-out gold sets sampled less often.
+  - Adversarial probing.
+  - Process supervision (not just outcome).
+- **Strong version**: any sufficiently powerful optimizer will Goodhart any proxy metric. Defense in depth, not a single fix.
+
+**Common follow-ups.**
+- "What's an example from recsys?" → Optimizing CTR ⇒ clickbait. Solution: balance CTR with dwell, retention, satisfaction surveys.
+- "Reward over-optimization curve?" → Gao, Schulman, Hilton (2022) — proxy reward rises while gold reward plateaus then drops.
+
+**Common mistakes.**
+- Treating Goodhart as a "theoretical concern" — it's a deployment-time reality.
+
+**References.**
+- [Gao, Schulman, Hilton — "Reward Model Overoptimization"](https://arxiv.org/abs/2210.10760).
+- [Manheim & Garrabrant — "Categorizing Variants of Goodhart's Law"](https://arxiv.org/abs/1803.04585).
+
+---
+
+### Q: What is mode collapse, and where does it appear in ML?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [mode-collapse, gans, sampling]
+
+**Short answer.** Mode collapse: the model output distribution covers only a fraction of the target distribution. Most famously in GANs (the generator finds one mode that fools the discriminator and stops there). Also appears in: LLM generation (model repeats safe phrasing), RL policies (deterministic policy ignores high-reward exploration), and DPO ("decrease likelihood of both chosen and rejected" pathology).
+
+**Expansion / why this is the answer.**
+- **GAN mode collapse**: generator emits a narrow distribution; discriminator can't distinguish; equilibrium reached without diversity.
+  - Mitigations: unrolled GANs, Wasserstein GAN, mode-regularizers, conditional GANs.
+- **LLM mode collapse**: post-RLHF models can converge on safe / generic phrasings ("As an AI language model..."); reduces output diversity.
+  - Mitigations: lower KL penalty β, temperature/top-p at inference, DPO with SFT auxiliary loss.
+- **RL mode collapse**: deterministic policy is trapped in a local optimum; doesn't explore.
+  - Mitigations: entropy regularization, exploration bonuses, ε-greedy.
+- **DPO pathology** (Rafailov 2023): the loss can be minimized by lowering log-prob of both chosen and rejected; both fall.
+  - Mitigation: SFT auxiliary loss.
+
+**Common follow-ups.**
+- "How do you detect mode collapse in LLMs?" → Output-diversity metrics (distinct-n, semantic-diversity); user reports of "model is repetitive."
+- "Why is it called 'mode' collapse?" → Probability theory: a mode is a peak of the distribution; collapse = many modes lost.
+
+**Common mistakes.**
+- Confusing mode collapse with overfitting.
+
+**References.**
+- [Arjovsky et al. — "Wasserstein GAN"](https://arxiv.org/abs/1701.07875).
+- [Rafailov et al. — "DPO"](https://arxiv.org/abs/2305.18290).
+
+---
+
+### Q: What is the bias-variance decomposition for cross-entropy / general losses?
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [bias-variance, decomposition, theory]
+
+**Short answer.** The bias-variance decomposition is cleanest for squared error: `E[(y - ŷ)²] = bias² + variance + irreducible noise`. For cross-entropy and general losses, an analogous decomposition exists (Heskes 1998) but is less clean — bias and variance interact non-additively for non-quadratic losses. Modern practice: report bias-variance qualitatively for classification, or use proper scoring rules (Brier score) for cleaner decompositions.
+
+**Expansion / why this is the answer.**
+- **MSE decomposition**: `E[(y − ŷ)²] = (E[ŷ] − f)² + E[(ŷ − E[ŷ])²] + σ²`.
+- **For 0-1 loss**: similar shape but doesn't decompose additively; Domingos 2000 has a version.
+- **For cross-entropy / log-loss**: Heskes (1998) — bias and variance defined via KL divergences from mean prediction.
+- **Brier score**: `(p̂ − y)²` (binary), proper scoring rule, decomposes cleanly.
+- **In practice**: people use the MSE-style decomposition as a *heuristic* for cross-entropy, knowing the math isn't strictly clean.
+
+**Common follow-ups.**
+- "Why does the decomposition not hold for arbitrary loss?" → Cross-entropy isn't quadratic in `ŷ`; the variance term doesn't split cleanly.
+- "How do you measure variance empirically?" → Train `N` models with different seeds; measure spread of predictions on a held-out point.
+
+**Common mistakes.**
+- Citing "the bias-variance decomposition" for classification without acknowledging the math is loose.
+
+**References.**
+- [Heskes — "Bias-Variance Decompositions for Likelihood-Based Estimators"](https://www.researchgate.net/publication/220280066_Bias-Variance_Decompositions_for_Likelihood-Based_Estimators).
+- [Domingos — "A Unified Bias-Variance Decomposition"](https://homes.cs.washington.edu/~pedrod/papers/mlc00a.pdf).
+
+---
+
+### Q: What is the no-free-lunch theorem, and what does it actually mean for ML?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [no-free-lunch, theory, inductive-bias]
+
+**Short answer.** Wolpert (1996): averaged over *all* possible target functions, every algorithm has equal expected performance. There's no universally best learner. In practice this means: **inductive bias matters** — algorithms that perform well do so because they're well-matched to the distribution of real-world problems, not because they're "universally good."
+
+**Expansion / why this is the answer.**
+- The theorem covers an unrealistic uniform distribution over all possible functions (most are random / unstructured).
+- Real-world data has structure (smoothness, locality, compositionality); algorithms with matching inductive bias win.
+- Examples of inductive bias:
+  - CNNs: translation equivariance, spatial locality.
+  - RNNs / Transformers: sequential / relational structure.
+  - GBMs: piecewise-constant axis-aligned decision boundaries.
+- The theorem is often cited to argue "no algorithm is universally best" — true but trivially, because real data isn't uniform.
+
+**Common follow-ups.**
+- "So is the theorem useful?" → As a philosophical reminder; not as a practical guide.
+- "What's the inductive bias of a transformer?" → Permutation-equivariant attention + positional encoding = strong on sequence/relational data.
+
+**Common mistakes.**
+- Citing NFL to argue any specific algorithm is hopeless — the theorem applies to uniform over all functions, not to your specific problem.
+
+**References.**
+- [Wolpert — "The Lack of A Priori Distinctions Between Learning Algorithms"](https://www.semanticscholar.org/paper/The-Lack-of-A-Priori-Distinctions-Between-Learning-Wolpert/9a01015d3f12d50f9358b1090ed4d0acf7d020fc).
+
+---
+
+### Q: What's the difference between L1 / L2 / Huber loss for regression?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [regression, loss, outliers, huber]
+
+**Short answer.** **L2 (MSE)**: `(y − ŷ)²`; smooth gradient; sensitive to outliers (squared penalty amplifies them). **L1 (MAE)**: `|y − ŷ|`; robust to outliers; gradient non-smooth at zero (subgradient methods). **Huber**: quadratic for small errors, linear for large — robust *and* smooth. Modern regression: use Huber when data has outliers; MSE otherwise.
+
+**Expansion / why this is the answer.**
+- **L2 / MSE**: MLE under Gaussian noise; smooth; the workhorse.
+- **L1 / MAE**: MLE under Laplace noise; gives the median, not the mean; robust.
+- **Huber**: `L_δ(r) = ½r² if |r| ≤ δ else δ(|r| − ½δ)`. Smooth, robust.
+- **Quantile loss**: pinball loss `max(τ(y − ŷ), (τ − 1)(y − ŷ))`. Gives the τ-th quantile; useful for prediction intervals.
+- **Why outliers matter**: L2's squared penalty makes a single 10σ outlier dominate the sum.
+
+**Common follow-ups.**
+- "Why does L1 give the median?" → Minimizer of `Σ|y − ŷ|` is the median; minimizer of `Σ(y − ŷ)²` is the mean.
+- "How is Huber different from clipping?" → Clipping zeroes large errors; Huber linearly penalizes them.
+
+**Common mistakes.**
+- Using MSE on data with heavy-tailed outliers; the model gets pulled toward them.
+
+**References.**
+- [Huber — "Robust Estimation of a Location Parameter"](https://projecteuclid.org/journals/annals-of-mathematical-statistics/volume-35/issue-1/Robust-Estimation-of-a-Location-Parameter/10.1214/aoms/1177703732.full).
+
+---
+
+### Q: How does a decision tree decide splits, and how does information gain compare to Gini?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [decision-tree, information-gain, gini]
+
+**Short answer.** A decision tree picks the split that maximally reduces impurity. **Information gain** uses entropy: `IG = H(parent) − Σ (n_child/n) · H(child)`. **Gini**: `Gini(p) = 1 − Σ p_i²`. Both are concave in `p`; in practice they yield nearly identical trees. Gini is faster (no log); CART uses Gini, ID3/C4.5 use information gain.
+
+**Expansion / why this is the answer.**
+- For each candidate feature × split point, compute the impurity reduction.
+- Pick the split that maximizes the reduction; recurse on children.
+- Stop when: pure node, max depth, min samples, no improvement.
+- Information gain and Gini give very similar splits empirically.
+- **Continuous features**: sort and consider thresholds between adjacent values.
+- **Regression**: minimize variance instead of entropy/Gini.
+
+**Common follow-ups.**
+- "Why does gradient boosting not need info gain?" → GBMs fit residuals; the per-tree split criterion is the loss gradient.
+- "What's pruning?" → Cost-complexity pruning; train deep tree, then prune back using a validation criterion.
+
+**Common mistakes.**
+- Saying info gain "is" entropy — it's a *reduction* in entropy.
+
+**References.**
+- [Breiman et al. — *Classification and Regression Trees*](https://www.routledge.com/Classification-and-Regression-Trees/Breiman-Friedman-Stone-Olshen/p/book/9780412048418) — CART.
+
+---
+
+### Q: What is the kernel trick mathematically?
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [kernel-trick, svm, derivation]
+
+**Short answer.** A kernel `K(x, y)` is a function such that `K(x, y) = ⟨φ(x), φ(y)⟩` for some feature map `φ`. Mercer's theorem says a symmetric positive-definite `K` always corresponds to some `φ` (possibly in an infinite-dimensional Hilbert space). The "trick" is that in any algorithm where inputs appear only via dot products, you can replace `⟨x, y⟩` with `K(x, y)` and never compute `φ` explicitly.
+
+**Expansion / why this is the answer.**
+- **The math**: linear algorithms (SVM, ridge regression, PCA) can often be re-expressed in terms of dot products.
+  - SVM dual: `max Σ α_i − ½ Σ α_i α_j y_i y_j ⟨x_i, x_j⟩` subject to constraints. Replace `⟨x_i, x_j⟩` with `K(x_i, x_j)`.
+- **Mercer's theorem** (informally): a continuous symmetric positive-definite kernel has an eigendecomposition giving the feature map.
+- **Common kernels**:
+  - Linear: `K(x, y) = x · y`.
+  - Polynomial: `(x · y + c)^d`.
+  - RBF: `exp(-γ ||x − y||²)`. Infinite-dimensional feature space.
+- **Why "trick"**: you never compute `φ`; only `K`. For RBF, `φ` is infinite-dim — explicit computation impossible.
+- **In modern DL**: largely supplanted by learned representations (deep nets compute features directly). Kernel methods linger in Gaussian processes, kernel-density-estimation, small-data tabular niches.
+
+**Common follow-ups.**
+- "What's a kernel that's NOT positive-definite?" → Sigmoid kernel `tanh(αx·y + c)`; conditionally positive but commonly used despite the technicality.
+- "Connection to attention?" → The attention score `softmax(QKᵀ)V` can be viewed as a kernel-trick variant where the kernel is learned.
+
+**Common mistakes.**
+- Treating any function `K(x, y)` as a kernel; not all are valid (must be PSD).
+
+**References.**
+- [Schölkopf & Smola — *Learning with Kernels*](https://mitpress.mit.edu/9780262536578/learning-with-kernels/).
+
+---
+
+### Q: What is convex optimization, and why does it matter in ML?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [convex-optimization, theory, optimization]
+
+**Short answer.** Convex optimization: minimize a convex function over a convex constraint set. The defining property: every local minimum is global. ML algorithms that are convex (linear / logistic regression, SVM, Lasso, kernel ridge) have unique optima reachable by gradient descent. Modern deep learning is **non-convex**; we work with empirical convergence (SGD finds good-enough minima) rather than theoretical guarantees.
+
+**Expansion / why this is the answer.**
+- **Convex function**: `f(tx + (1-t)y) ≤ t f(x) + (1-t) f(y)`. Geometrically: any line segment between two points on the graph lies above the graph.
+- **Convex ML problems**:
+  - Linear regression with MSE.
+  - Logistic regression (loss is convex in weights).
+  - SVM (convex in the dual).
+  - Lasso, ridge.
+- **Non-convex ML problems**: any neural network.
+- **Why convexity matters**:
+  - Gradient descent converges to the global minimum.
+  - Strong theoretical guarantees on convergence rate.
+  - Convex problems are "solved" in principle.
+- **For neural networks**: we have no convergence guarantees but empirically SGD works. Recent work (lottery-ticket, mode connectivity) explores why.
+
+**Common follow-ups.**
+- "Why is deep learning's loss landscape easier than expected?" → High dimensionality + over-parameterization means many local minima are near-global (Choromanska et al. 2015).
+- "What's a convex optimization library?" → CVXPY for prototyping convex problems.
+
+**Common mistakes.**
+- Calling neural-network optimization "convex" because the loss is convex in *each layer* — it's non-convex in the joint parameters.
+
+**References.**
+- [Boyd & Vandenberghe — *Convex Optimization*](https://web.stanford.edu/~boyd/cvxbook/) — canonical text.
+
+---
+
+### Q: What's the difference between batch normalization at training time and inference time?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [batch-norm, train-eval]
+
+**Short answer.** At **training**, BN normalizes using the current batch's statistics (mean, std). At **inference**, BN uses running averages of batch statistics accumulated during training. This is a source of train-eval gaps — a model evaluated on a single sample uses a *different* normalization than at training, and these stats can drift if the deployment data distribution differs from training.
+
+**Expansion / why this is the answer.**
+- **Train**: per-batch `μ, σ` from `B` samples. Backprop through normalization.
+- **Eval**: pre-computed running averages (typically exponential moving average across training batches).
+- Why this matters:
+  - **Batch-size sensitivity**: BN is poorly behaved at very small batch sizes (noisy `μ, σ`).
+  - **Train-eval gap**: running statistics may differ from deployment-time true statistics if data drifts.
+  - **Multi-GPU**: synchronized BN (SyncBN) averages stats across GPUs to avoid per-rank batch being too small.
+- **Why LayerNorm replaces BN in transformers**:
+  - Per-sample normalization; no batch dependence.
+  - No train-eval gap.
+
+**Common follow-ups.**
+- "What's GroupNorm's solution to BN's small-batch issue?" → Normalize within groups of channels, batch-independent.
+- "What if you train with BN, deploy with batch=1?" → Running stats kick in; no issue *if* the running stats are accurate for the deployment distribution.
+
+**Common mistakes.**
+- Forgetting to set the model to `eval()` mode at inference; BN behaves wrong.
+
+**References.**
+- [Ioffe & Szegedy — "Batch Normalization"](https://arxiv.org/abs/1502.03167).
+
+---
+
+### Q: What is the relationship between PCA and SVD?
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [pca, svd, linear-algebra]
+
+**Short answer.** PCA on a centered data matrix `X` is mathematically equivalent to taking the right singular vectors of `X`: if `X = UΣVᵀ`, then `V` are the principal directions and `Σ²/n` are the principal variances. So PCA *is* SVD (on centered data) — same computation, different framing.
+
+**Expansion / why this is the answer.**
+- Setup: data `X ∈ ℝ^{N×D}`, centered (column means subtracted).
+- **PCA**: eigendecompose the covariance matrix `Σ_X = (1/N) XᵀX`. Eigenvectors = principal directions; eigenvalues = variances.
+- **SVD**: `X = UΣVᵀ`. Then `XᵀX = V Σ² Vᵀ`. So `V` = principal directions; `Σ²/N` = principal variances.
+- **Numerically**: SVD on `X` is more stable than eigendecomposing `XᵀX` (which squares the conditioning).
+- **Whitening**: project to PCA basis and divide by sqrt of eigenvalue; resulting features have identity covariance.
+
+**Common follow-ups.**
+- "Why is SVD numerically preferred?" → Avoids forming `XᵀX`, which doubles the conditioning number.
+- "What's the rank of PCA's representation at `k` components?" → `min(k, rank(X))`.
+
+**Common mistakes.**
+- Forgetting to center before PCA (or before SVD-for-PCA).
+- Confusing left singular vectors (sample basis) with right (feature basis).
+
+**References.**
+- [Trefethen & Bau — *Numerical Linear Algebra*, Lecture 4](https://people.maths.ox.ac.uk/trefethen/text.html) — SVD canonical.
+
+---
+
+### Q: What is a Bayesian neural network?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [bayesian-nn, uncertainty, vi]
+
+**Short answer.** A Bayesian neural network treats weights as random variables with a prior `p(θ)`, and infers a posterior `p(θ | data)`. Predictions integrate over the posterior: `p(y | x) = ∫ p(y | x, θ) p(θ | D) dθ`. Useful for uncertainty quantification. Methods: variational inference (Blundell et al. 2015, "Bayes by Backprop"), Monte Carlo dropout (Gal & Ghahramani 2016), Laplace approximation. Computationally expensive — deep ensembles are often a strong empirical baseline.
+
+**Expansion / why this is the answer.**
+- **Why**: standard NNs give point predictions; Bayesian NNs give predictive distributions and *epistemic* uncertainty (how confident is the model in its parameters).
+- **Methods**:
+  - **Variational inference**: approximate posterior with a tractable family (e.g. Gaussian); minimize ELBO.
+  - **MC Dropout**: approximate inference via dropout at test time.
+  - **Laplace approximation**: Gaussian centered at MAP estimate; covariance from inverse Hessian.
+  - **HMC / SGLD**: MCMC sampling from the posterior; slow but exact.
+- **Practical alternatives**:
+  - **Deep ensembles**: train N models with different seeds; ensemble. Empirically strong; expensive.
+  - **Heteroscedastic regression**: output variance head; predicts aleatoric uncertainty (data noise), not epistemic.
+- **When to use**:
+  - Safety-critical applications (medical, autonomous driving).
+  - Active learning (need calibrated uncertainty to select examples).
+  - Bayesian optimization (need posterior over surrogate).
+
+**Common follow-ups.**
+- "Aleatoric vs epistemic uncertainty?" → Aleatoric: irreducible data noise. Epistemic: model uncertainty (decreases with more data).
+- "Why don't LLMs use Bayesian methods?" → Computationally infeasible at scale; ensembles or temperature-based proxies used instead.
+
+**Common mistakes.**
+- Conflating MC Dropout with full Bayesian inference (it's an approximation).
+
+**References.**
+- [Blundell et al. — "Bayes by Backprop"](https://arxiv.org/abs/1505.05424).
+- [Gal & Ghahramani — "MC Dropout"](https://arxiv.org/abs/1506.02142).
+
+---
+
+### Q: When does data augmentation help, and what are some common pitfalls?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [data-augmentation, vision, training]
+
+**Short answer.** Augmentation expands the effective training set by applying label-preserving transformations (image flips, color jitter, mixup). Helps especially in small-data and image-domain settings; benefits diminish at very large scale (the data itself is abundant). Pitfalls: augmentations that change the label (e.g. horizontal flip on text or asymmetric objects), augmentation distribution mismatch (overly aggressive cropping reduces signal), and forgetting to disable augmentation at validation/test.
+
+**Expansion / why this is the answer.**
+- **Image augmentation**: flip, crop, rotate, color jitter, cutout, mixup, CutMix.
+- **Text augmentation**: synonym replacement, back-translation, paraphrasing — generally less effective than image.
+- **Mixup** (Zhang et al. 2018): linearly interpolate two images and their labels; regularizer.
+- **CutMix** (Yun et al. 2019): replace a region with a patch from another image; mix labels proportionally.
+- **AutoAugment / RandAugment**: learned / random augmentation policies.
+- **When augmentation hurts**: when the augmentation breaks the label semantics (digits, asymmetric objects), or when very aggressive augmentations dominate the true distribution.
+
+**Common follow-ups.**
+- "Is augmentation useful at LLM-pretraining scale?" → Limited; the data itself is huge. Text augmentation is more useful for fine-tuning small models on narrow data.
+- "What's test-time augmentation?" → Apply augmentations at inference, average predictions; cheap ensembling for classification.
+
+**Common mistakes.**
+- Forgetting to disable augmentation at eval.
+- Augmenting in a way that changes the label.
+
+**References.**
+- [Zhang et al. — "mixup"](https://arxiv.org/abs/1710.09412).
+- [Yun et al. — "CutMix"](https://arxiv.org/abs/1905.04899).
+
+---
+
+### Q: What is contrastive learning, and how does SimCLR work?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [contrastive-learning, simclr, self-supervised]
+
+**Short answer.** Contrastive learning trains representations by pulling together "positive pairs" and pushing apart "negative pairs." **SimCLR** (Chen et al. 2020): generate two augmented views of the same image (positive pair); contrast against other images in the batch (negative pairs); use the NT-Xent loss (a temperature-scaled softmax over similarities). Strong self-supervised baseline for vision; CLIP extends it to image-text.
+
+**Expansion / why this is the answer.**
+- **Goal**: learn an encoder `f(x)` such that semantically similar inputs have similar embeddings.
+- **SimCLR**:
+  - Take an image `x`; apply two random augmentations to get `x_1, x_2`.
+  - Encode → projection head → compute embeddings.
+  - Loss: `−log exp(sim(z_1, z_2)/τ) / Σ_k exp(sim(z_1, z_k)/τ)` over all `z_k` in the batch.
+  - Negative pairs: all other batch elements.
+- **Key ingredients**:
+  - Strong augmentation (random crop + color distortion + Gaussian blur).
+  - Large batch size (more negatives = better learning).
+  - Projection head (linear projection during training; discarded for downstream).
+- **MoCo** (He et al. 2019): same idea, but uses a momentum-updated encoder and a memory bank of negatives — works with smaller batches.
+- **CLIP** (Radford et al. 2021): contrastive learning across image-text pairs; learned joint embedding space.
+
+**Common follow-ups.**
+- "Why is the projection head discarded for downstream?" → Empirically, the pre-projection features are more general.
+- "Why is large batch helpful?" → More negatives improve the contrastive signal.
+
+**Common mistakes.**
+- Forgetting that augmentations define what's "semantically similar" — augmentation design is crucial.
+
+**References.**
+- [Chen et al. — "SimCLR"](https://arxiv.org/abs/2002.05709).
+- [He et al. — "MoCo"](https://arxiv.org/abs/1911.05722).
+- [Radford et al. — "CLIP"](https://arxiv.org/abs/2103.00020).
+
+---
+
+### Q: What is the receptive field in CNNs, and why does it matter?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [cnn, receptive-field, architecture]
+
+**Short answer.** A neuron's receptive field is the region of the input image that affects its activation. It grows with depth, kernel size, and stride. For a model to recognize large objects, its deeper layers' receptive field must cover relevant spatial extent. The effective receptive field (Luo et al. 2016) is Gaussian-shaped — neurons are most influenced by the center of their nominal RF, with diminishing influence at the edges.
+
+**Expansion / why this is the answer.**
+- **Theoretical RF**: depth-recursive — kernel size + stride compound across layers.
+- **Effective RF** (Luo et al. 2016): the actual sensitivity, weighted by gradient flow; much smaller than theoretical, Gaussian-shaped.
+- **Stride and pooling** grow RF faster than convolutions alone.
+- **Dilated convolutions** (Yu & Koltun 2015): increase RF exponentially without adding parameters.
+- **For transformers**: attention's "RF" is the whole context (causal mask aside) — every token can attend to every other. This is part of why transformers beat CNNs on long-context tasks.
+
+**Common follow-ups.**
+- "What's the receptive field of attention?" → Full sequence (within the causal mask); contrasts with the limited RF of conv.
+- "Why does ResNet have huge theoretical RF but limited effective RF?" → Skip connections route info; gradient magnitude diminishes far from center.
+
+**Common mistakes.**
+- Reporting theoretical RF and assuming the neuron "sees" the whole region equally.
+
+**References.**
+- [Luo et al. — "Understanding the Effective Receptive Field in Deep Convolutional Neural Networks"](https://arxiv.org/abs/1701.04128).
+- [Yu & Koltun — "Multi-Scale Context Aggregation by Dilated Convolutions"](https://arxiv.org/abs/1511.07122).
+
+---
