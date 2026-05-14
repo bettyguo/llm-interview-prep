@@ -488,3 +488,389 @@ The fundamentals layer. Every entry conforms to the schema in [CONTRIBUTING.md](
 - [Chen et al. — "A Simple Framework for Contrastive Learning of Visual Representations" (SimCLR)](https://arxiv.org/abs/2002.05709) — self-supervised contrastive learning.
 
 ---
+
+### Q: Derive the gradient of softmax + cross-entropy with respect to the pre-softmax logits.
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [softmax, cross-entropy, gradients, derivation]
+
+**Short answer.** `∂L/∂z_i = p_i − y_i`, where `p = softmax(z)` and `y` is the one-hot target. The clean "predicted minus actual" form is the whole reason softmax + cross-entropy is the standard pairing — the messy `p_i(1 − p_i)` derivative from softmax cancels against the `1/p_i` from cross-entropy's `log`.
+
+**Expansion / why this is the answer.**
+- Setup: logits `z ∈ ℝ^K`; softmax `p_i = exp(z_i) / Σ_j exp(z_j)`; loss `L = −Σ_k y_k log p_k` (one-hot `y`).
+- Softmax Jacobian: `∂p_i / ∂z_j = p_i(δ_{ij} − p_j)`.
+- Chain rule:
+  `∂L/∂z_j = Σ_i (∂L/∂p_i)(∂p_i/∂z_j) = Σ_i (−y_i/p_i) · p_i(δ_{ij} − p_j) = Σ_i −y_i(δ_{ij} − p_j) = −y_j + p_j · Σ_i y_i = p_j − y_j` (since `Σ y_i = 1`).
+- The same identity is what makes `softmax + NLL` numerically convenient — gradient computation collapses to a subtraction.
+- This is the canonical interview derivation; you should be able to do it cold on a whiteboard.
+
+**Common follow-ups.**
+- "What about non-one-hot targets (label smoothing)?" → Same derivation; `y` becomes the smoothed distribution; result is still `p − y`.
+- "Why doesn't this simplification happen for MSE + softmax?" → MSE's `∂L/∂p` is `2(p − y)`, not `−y/p`, so the softmax-Jacobian factor `p_i(1 − p_i)` doesn't cancel — and that's why MSE-on-softmax has the dead-gradient problem.
+
+**Common mistakes.**
+- Forgetting that `Σ y_i = 1` lets you collapse the final step.
+- Getting the sign of `δ_{ij}` wrong (off-by-sign is common under pressure).
+
+**References.**
+- [Bishop, *Pattern Recognition and Machine Learning*, §4.3.4](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/) — softmax derivation.
+- [Goodfellow, Bengio, Courville — *Deep Learning*, §6.2.2.3](https://www.deeplearningbook.org/) — cross-entropy gradient.
+
+---
+
+### Q: When does bagging beat boosting, and when does the reverse hold?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [bagging, boosting, ensembles, random-forest, gbm]
+
+**Short answer.** Bagging (Random Forest) trains independent learners in parallel on bootstrap samples and averages — best when base learners are high-variance and you want stability + parallelism. Boosting (GBM/XGBoost/LightGBM/CatBoost) trains learners sequentially, each correcting the previous's residuals — typically wins on accuracy when well-tuned, at the cost of being sensitive to noisy labels and harder to parallelize.
+
+**Expansion / why this is the answer.**
+- **Bagging** (Breiman 1996; Random Forest 2001):
+  - Bootstrap-sample the data; train a high-variance model (deep tree) on each.
+  - Aggregate by averaging (regression) or voting (classification).
+  - Variance reduction via averaging; bias unchanged from the base learner.
+  - Embarrassingly parallel.
+  - Robust to noisy labels (outliers averaged out).
+- **Boosting** (Friedman 2001 Gradient Boosting; XGBoost, LightGBM, CatBoost):
+  - Train sequentially; each weak learner fits the previous's residuals (or gradient).
+  - Reduces both bias and variance; typically lower bias than bagging.
+  - Sensitive to label noise (model amplifies it through residuals).
+  - Sequential — harder to parallelize across boosting iterations (but parallel within a tree).
+- **When bagging wins**:
+  - Very noisy labels.
+  - You want predictable runtime / parallelism.
+  - Quick baseline with minimal tuning.
+- **When boosting wins**:
+  - Most Kaggle / production tabular problems — boosted-tree variants top leaderboards.
+  - Cleaner labels; willing to tune.
+- **Modern picks**: LightGBM for speed at scale; CatBoost for categorical-heavy tabular; XGBoost for general workhorse.
+- **Deep tabular** (TabNet, FT-Transformer): closed some gaps but typically still lose to boosted trees per Grinsztajn 2022.
+
+**Common follow-ups.**
+- "Why is Random Forest 'embarrassingly parallel'?" → Each tree trains on its own bootstrap independently; no inter-tree dependency.
+- "What's gradient boosting's gradient, exactly?" → The negative gradient of the loss with respect to the current prediction, computed sample-by-sample.
+
+**Common mistakes.**
+- Calling Random Forest "boosting" or vice versa.
+- Forgetting that boosting overfits noisy labels.
+
+**References.**
+- [Breiman — "Random Forests"](https://link.springer.com/article/10.1023/A:1010933404324) — RF.
+- [Friedman — "Greedy Function Approximation: A Gradient Boosting Machine"](https://www.jstor.org/stable/2699986) — gradient boosting.
+- [Chen & Guestrin — "XGBoost"](https://arxiv.org/abs/1603.02754) — XGBoost.
+
+---
+
+### Q: Walk through the EM algorithm using GMM as the example.
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [em, gmm, latent-variables, mle]
+
+**Short answer.** EM (Expectation-Maximization) iteratively maximizes a likelihood with latent variables: **E-step** computes the posterior over latents given current parameters; **M-step** updates parameters to maximize the expected complete-data log-likelihood under that posterior. For GMM, E-step computes "responsibilities" `γ_ik` (probability that point `i` came from cluster `k`); M-step updates mixing weights, means, and covariances as responsibility-weighted statistics.
+
+**Expansion / why this is the answer.**
+- **The problem**: data `x_1..x_N`; model `p(x) = Σ_k π_k N(x | μ_k, Σ_k)`. Marginal log-likelihood is non-convex; direct MLE is hard because of the sum-inside-log.
+- **EM trick**: introduce latent assignment `z_i ∈ {1..K}` (which Gaussian generated `x_i`); compute the lower bound (ELBO) on `log p(x)`; alternate.
+- **E-step** (responsibilities): `γ_ik = π_k N(x_i | μ_k, Σ_k) / Σ_j π_j N(x_i | μ_j, Σ_j)`.
+- **M-step** (closed-form for GMM):
+  - `N_k = Σ_i γ_ik`
+  - `π_k = N_k / N`
+  - `μ_k = (1/N_k) Σ_i γ_ik x_i`
+  - `Σ_k = (1/N_k) Σ_i γ_ik (x_i − μ_k)(x_i − μ_k)ᵀ`
+- **Properties**:
+  - Each step never decreases the data log-likelihood (Dempster, Laird, Rubin 1977).
+  - Converges to a local maximum (not global).
+  - Sensitive to initialization (k-means warmup is standard).
+- **Connection to k-means**: k-means is a hard-assignment limit of GMM-EM (let covariances → identity-scaled, responsibilities → one-hot).
+- **Modern uses**: still important for mixture models, HMMs, topic models (LDA via variational EM). The general framework underlies the variational autoencoder.
+
+**Common follow-ups.**
+- "Why does EM monotonically increase log-likelihood?" → Jensen's-inequality bound becomes tight after the E-step; M-step increases the bound.
+- "When does EM fail?" → Singular covariance (one Gaussian collapses to one point with zero covariance — degenerate likelihood); poor init.
+
+**Common mistakes.**
+- Forgetting EM converges to a local optimum (not global).
+- Mixing the assignment step with the parameter update (think of them as separate).
+
+**References.**
+- [Bishop, *Pattern Recognition and Machine Learning*, §9](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/) — EM and GMM canonical reference.
+- [Dempster, Laird, Rubin — "Maximum Likelihood from Incomplete Data via the EM Algorithm"](https://www.jstor.org/stable/2984875) — the original 1977 paper.
+
+---
+
+### Q: Walk through backpropagation step by step for a 2-layer MLP.
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [backprop, chain-rule, mlp]
+
+**Short answer.** Forward: compute activations through layers. Backward: starting from the loss, recursively apply the chain rule to propagate gradients back to each parameter. For a 2-layer MLP `y = W₂ · σ(W₁ x + b₁) + b₂`, gradients are: `∂L/∂W₂` from `∂L/∂y × hᵀ`; `∂L/∂h` from `W₂ᵀ ∂L/∂y`; through σ' to get `∂L/∂(W₁x + b₁)`; then to `∂L/∂W₁` and `∂L/∂b₁`.
+
+**Expansion / why this is the answer.**
+- Setup:
+  - `z₁ = W₁ x + b₁` (pre-activation)
+  - `h = σ(z₁)` (hidden)
+  - `z₂ = W₂ h + b₂` (output logits)
+  - `L = Loss(z₂, y_target)`
+- Forward pass: compute `z₁, h, z₂` and `L` in order.
+- Backward pass (denote `δᵢ = ∂L/∂zᵢ`):
+  - `δ₂ = ∂L/∂z₂` (e.g. `softmax(z₂) − y` for softmax+CE).
+  - `∂L/∂W₂ = δ₂ hᵀ`
+  - `∂L/∂b₂ = δ₂`
+  - `∂L/∂h = W₂ᵀ δ₂`
+  - `δ₁ = (W₂ᵀ δ₂) ⊙ σ'(z₁)` (Hadamard product with activation derivative).
+  - `∂L/∂W₁ = δ₁ xᵀ`
+  - `∂L/∂b₁ = δ₁`
+- **Why it works**: each layer's `δ` is the layer's "error signal"; gradients with respect to parameters follow from the chain rule and the outer product with the layer's input.
+- **Autograd**: deep-learning frameworks (PyTorch, JAX) build a computation graph at forward time and walk it backward; you never write these formulas by hand in practice — but you should understand them for interviews.
+
+**Common follow-ups.**
+- "What's the cost in memory of backprop?" → Must store all forward activations (or recompute via gradient checkpointing).
+- "Why σ' multiplied in `δ₁`?" → Chain through the activation: `∂h/∂z₁ = σ'(z₁)`, applied elementwise (Hadamard).
+- "How does this generalize to a deep net?" → Same recursion; `δ_l = (W_{l+1}ᵀ δ_{l+1}) ⊙ σ'_l`.
+
+**Common mistakes.**
+- Forgetting the Hadamard with `σ'` for the activation derivative.
+- Transposing `W` in the wrong direction.
+- Treating gradients as scalars when they're tensors with specific shapes.
+
+**References.**
+- [Goodfellow, Bengio, Courville — *Deep Learning*, §6.5](https://www.deeplearningbook.org/) — backpropagation canonical.
+- [Rumelhart, Hinton, Williams — "Learning representations by back-propagating errors"](https://www.nature.com/articles/323533a0) — the 1986 paper.
+
+---
+
+### Q: What is dropout? Why does it work, and where do you not use it?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [dropout, regularization, deep-learning]
+
+**Short answer.** Dropout (Srivastava et al. 2014) randomly zeros out a fraction `p` of activations during training, forcing each unit to be useful without relying on any particular neighbor — an implicit ensemble. At inference, no dropout is applied, but activations are scaled by `(1-p)` to preserve expected magnitudes (or "inverted dropout" applies the `/(1-p)` at train time so inference is unchanged). Strong on overparameterized models with small data. Modern LLMs largely don't use dropout in the FFN/attention layers because they're trained on enough data that regularization is unnecessary and dropout interacts badly with mixed precision.
+
+**Expansion / why this is the answer.**
+- The mechanism: per training step, sample a binary mask; zero out activations; rescale the rest.
+- **Ensemble interpretation**: dropout is approximate model averaging over an exponential number of sub-networks.
+- **Hyperparameter**: dropout probability `p ∈ [0, 0.5]`. Higher = more regularization.
+- **Variants**:
+  - Standard dropout: per-element.
+  - DropConnect (Wan et al. 2013): drop weights, not activations.
+  - Spatial dropout (CNNs): drop entire feature maps.
+- **Where it's used**:
+  - Smaller models (BERT-base, classical CNNs).
+  - LoRA layers (typical: dropout 0.05–0.1 on the adapter input).
+  - During SFT of LLMs (small dropout, e.g. 0.1).
+- **Where it's not used (in 2026 frontier LLM pretraining)**:
+  - Decoder-only pretraining; the data is so abundant that overfitting isn't the binding constraint.
+  - With Mixed Precision, dropout requires careful masking math; the benefit doesn't justify the complexity.
+- **DropPath / Stochastic Depth** (Huang et al. 2016): drop entire layers at training time; a regularizer used in some vision transformers.
+
+**Common follow-ups.**
+- "Why scale by `(1-p)` at inference?" → To preserve expected activation magnitudes. Inverted dropout scales at train time instead.
+- "What's MC Dropout?" → Keep dropout on at inference and average many forward passes; gives an approximate Bayesian uncertainty estimate (Gal & Ghahramani 2016).
+
+**Common mistakes.**
+- Forgetting the scaling factor entirely → magnitudes drift at inference.
+- Using dropout on layers that already have strong regularization (e.g. heavy weight decay + LayerNorm).
+
+**References.**
+- [Srivastava et al. — "Dropout"](https://www.cs.toronto.edu/~hinton/absps/JMLRdropout.pdf) — the canonical paper.
+- [Gal & Ghahramani — "Dropout as a Bayesian Approximation"](https://arxiv.org/abs/1506.02142) — MC dropout.
+
+---
+
+### Q: Difference between batch GD, stochastic GD, and mini-batch GD. Which do modern systems use?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [sgd, batch-size, optimization]
+
+**Short answer.** **Batch GD**: gradient over the entire dataset per step — slow, accurate, smooth descent. **Stochastic GD (SGD)**: gradient from one sample — fast updates, noisy descent. **Mini-batch GD**: gradient from a batch of `B` samples — the universal modern compromise. LLMs use mini-batch with very large effective batch sizes (millions of tokens), often via gradient accumulation across micro-batches.
+
+**Expansion / why this is the answer.**
+- **Batch GD**: theoretically smooth; impractical at scale (one update per epoch).
+- **SGD** (one sample): fast updates per step; noisy gradients can help escape saddle points.
+- **Mini-batch** (typical 32–8192 samples): trade-off; the standard everywhere.
+- **LLM training scales**:
+  - Effective batch = micro-batch × gradient-accumulation-steps × DP-degree.
+  - GPT-3 trained at batch size ~3.2M tokens.
+  - LLaMA 3 reportedly trained at 16M tokens/batch.
+  - Limits: too-large batch hits diminishing returns (Smith et al. 2017, "Don't Decay the Learning Rate, Increase the Batch Size").
+- **Practical considerations**:
+  - **Gradient accumulation**: simulate larger batch when GPU memory limits the micro-batch.
+  - **LR scaling**: larger batch typically needs higher LR (linear scaling rule, Goyal et al. 2017, but it breaks down beyond a regime).
+  - **Critical batch size** (McCandlish et al. 2018): the size beyond which gains saturate; depends on the gradient noise.
+
+**Common follow-ups.**
+- "Why do we need bigger batches?" → Throughput (utilization), stability, sample efficiency tradeoffs.
+- "What's the LR-batch relationship?" → Linear scaling rule (LR ∝ batch) within a window; breaks down at very large batch.
+
+**Common mistakes.**
+- Conflating "batch" (full dataset) with "mini-batch" (subset).
+- Forgetting that DDP / FSDP multiply effective batch.
+
+**References.**
+- [Smith et al. — "Don't Decay the Learning Rate, Increase the Batch Size"](https://arxiv.org/abs/1711.00489).
+- [McCandlish et al. — "An Empirical Model of Large-Batch Training"](https://arxiv.org/abs/1812.06162) — critical batch size.
+- [Goyal et al. — "Accurate, Large Minibatch SGD"](https://arxiv.org/abs/1706.02677) — linear LR scaling rule.
+
+---
+
+### Q: When is early stopping the right regularizer, and when is it not?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [early-stopping, regularization, generalization]
+
+**Short answer.** Early stopping halts training when validation loss stops improving — the most common and cheapest regularizer in classical ML. Good when training-vs-validation curves diverge clearly (overfitting). Bad when (a) you're under the double-descent threshold (modern overparameterized regime where more training helps), (b) you have a very small validation set with noisy signals, or (c) the val loss has multiple local minima during training.
+
+**Expansion / why this is the answer.**
+- The simple rule: monitor val loss; stop after N epochs without improvement; revert to the best-val checkpoint.
+- **Why it works**: classically, after some point, gradient updates fit training noise rather than signal. Early stop = effective capacity reduction.
+- **Modern overparameterized DL**: the picture is different. Models often keep improving past the apparent overfitting point (Nakkiran et al. 2020 double descent). LLMs are trained well past the "naive overfitting" boundary because they're overparameterized for the dataset.
+- **When still used**:
+  - Classical ML (GBMs, SVMs, smaller DL).
+  - Fine-tuning regime where overfitting is fast.
+  - Resource constraints (can't afford full training).
+- **Variants**:
+  - **Patience-based**: stop after N epochs without val improvement.
+  - **Loss-threshold-based**: stop when val loss < threshold.
+- **Failure modes**:
+  - Tiny val set → noisy signal → false-positive stops.
+  - Cyclic learning rates: val loss oscillates; check after each cycle.
+
+**Common follow-ups.**
+- "How do you do early stopping in distributed training?" → All ranks track val loss; stop signaled across all ranks.
+- "Doesn't this require a held-out val set?" → Yes; the cost is one extra forward pass periodically.
+
+**Common mistakes.**
+- Early stopping on training loss (defeats the purpose).
+- Tiny patience → false stops.
+
+**References.**
+- [Goodfellow, Bengio, Courville — *Deep Learning*, §7.8](https://www.deeplearningbook.org/) — early stopping.
+- [Nakkiran et al. — "Deep Double Descent"](https://arxiv.org/abs/1912.02292) — overparameterized regime breaks classical intuition.
+
+---
+
+### Q: Compare Random Forest and Gradient Boosting on a tabular problem.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [random-forest, gbm, comparison, tabular]
+
+**Short answer.** Both are tree ensembles. **RF**: independent trees trained on bootstrap samples; aggregate by voting; reduces variance. **GBM**: sequential trees, each fitting residuals; reduces both bias and variance. RF is faster to train (parallel) and more robust to noisy labels. GBM (XGBoost / LightGBM / CatBoost) is typically more accurate on most tabular benchmarks when tuned. Default first pick: GBM. RF as a baseline or under label-noise constraints.
+
+**Expansion / why this is the answer.**
+- **Training time**:
+  - RF: parallel; embarrassingly so.
+  - GBM: sequential across boosting rounds; parallel within each tree.
+- **Hyperparameter sensitivity**:
+  - RF: relatively robust; `n_estimators`, `max_depth` cover most of the variance.
+  - GBM: many knobs (learning rate, depth, regularization, subsampling); needs tuning.
+- **Performance**:
+  - On most tabular benchmarks: GBM > RF when both are tuned.
+  - On noisy data: RF often competitive; GBM can overfit noise.
+- **Modern picks**:
+  - LightGBM: fastest GBM, leaf-wise growth.
+  - XGBoost: most-tested; broad feature set.
+  - CatBoost: best for categorical features (ordered boosting).
+  - RF (scikit-learn): the no-tuning baseline.
+- **Both handle**:
+  - Missing values (with different mechanisms).
+  - Mixed numeric / categorical (with encoding).
+  - No need to scale features.
+- **Neither needs**: scaling, PCA, neural-net-style preprocessing.
+
+**Common follow-ups.**
+- "Why is GBM more accurate?" → Sequential residual-fitting reduces bias; the model class is more expressive.
+- "When would you stick with RF?" → Quick baseline, noisy labels, parallelism-critical.
+- "Why is the leaf-wise growth in LightGBM faster than XGBoost's level-wise?" → Less wasted computation; can be more accurate but more prone to overfit on small data.
+
+**Common mistakes.**
+- Saying RF is a kind of boosting (it's bagging).
+- Picking RF for accuracy on clean data.
+
+**References.**
+- [Breiman — "Random Forests"](https://link.springer.com/article/10.1023/A:1010933404324) — RF.
+- [Chen & Guestrin — "XGBoost"](https://arxiv.org/abs/1603.02754) — XGBoost.
+- [Ke et al. — "LightGBM"](https://papers.nips.cc/paper_files/paper/2017/hash/6449f44a102fde848669bdd9eb6b76fa-Abstract.html) — LightGBM.
+- [Prokhorenkova et al. — "CatBoost"](https://arxiv.org/abs/1706.09516) — CatBoost.
+
+---
+
+### Q: Explain SVMs and the kernel trick.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [svm, kernel-trick, max-margin]
+
+**Short answer.** SVM finds the hyperplane that maximizes the margin between two classes — robust to outliers far from the boundary. The kernel trick replaces dot products `xᵢ · xⱼ` with a kernel `K(xᵢ, xⱼ)` that implicitly maps inputs to a higher-dimensional space, letting SVM learn non-linear boundaries without ever computing the high-dimensional feature vectors. Common kernels: RBF, polynomial, linear. Mostly displaced by deep learning at scale but still strong on small-to-medium tabular with non-linear structure.
+
+**Expansion / why this is the answer.**
+- **Hard-margin SVM** (separable case): minimize `||w||²/2` subject to `y_i(w · x_i + b) ≥ 1`. Dual involves `Σ α_i y_i y_j x_i · x_j`.
+- **Soft-margin** (non-separable): add slack `ξ_i` with hinge loss; trade margin width for misclassification.
+- **Kernel trick**: replace `x_i · x_j` in the dual with `K(x_i, x_j)`. The implicit feature map `φ(x)` satisfies `K(x_i, x_j) = φ(x_i) · φ(x_j)` but you never compute `φ` explicitly.
+- **Common kernels**:
+  - **Linear**: `K(x, y) = x · y`. Equivalent to no kernel.
+  - **Polynomial**: `(x · y + c)^d`.
+  - **RBF / Gaussian**: `exp(-γ ||x − y||²)`. Implicit feature space is infinite-dimensional.
+  - **Sigmoid**: `tanh(α x · y + c)`.
+- **Support vectors**: the training points with non-zero `α_i` — the ones near the boundary. Prediction depends only on these.
+- **Complexity**: training is `O(N²)` to `O(N³)`; prohibitive past ~100k samples. Use linear-SVM solvers (LIBLINEAR) for large-scale linear case.
+- **Modern context**: SVMs are rarely the right tool for big tabular (boosted trees win) or text/image (deep nets win). They linger in small-data, classical-ML, or kernel-method research.
+
+**Common follow-ups.**
+- "What does the RBF kernel's `γ` control?" → Width of the Gaussian; smaller `γ` = wider influence, smoother boundary.
+- "Why is the kernel trick called a 'trick'?" → You compute K without computing the feature map; sometimes the feature space is infinite-dimensional (RBF).
+
+**Common mistakes.**
+- Treating SVM as a probabilistic classifier; it's geometrically motivated (margin), Platt scaling adds probabilities post-hoc.
+- Forgetting SVMs don't scale to >100k samples in their classical form.
+
+**References.**
+- [Cortes & Vapnik — "Support-Vector Networks"](https://link.springer.com/article/10.1007/BF00994018) — original SVM paper.
+- [Bishop, *Pattern Recognition and Machine Learning*, §7](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/) — kernel methods chapter.
+- [Schölkopf & Smola — *Learning with Kernels*](https://mitpress.mit.edu/9780262536578/learning-with-kernels/) — kernel-methods textbook.
+
+---
+
+### Q: Logistic regression vs. linear regression — when to use each, and why are they "linear"?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [logistic-regression, linear-regression, glm]
+
+**Short answer.** **Linear regression**: predicts a continuous target; minimizes squared error; assumes Gaussian noise. **Logistic regression**: predicts probability of a binary class; applies sigmoid to a linear combination; minimizes cross-entropy. Both are "linear models" because the prediction is a linear function of the inputs (before any output transformation). Logistic regression is the workhorse binary classifier; linear regression for continuous targets when relationships are roughly linear.
+
+**Expansion / why this is the answer.**
+- **Linear regression**: `y = w · x + b`. MLE under Gaussian noise = least squares. Closed-form solution via the normal equations; or solve with gradient descent at scale.
+- **Logistic regression**: `p = σ(w · x + b)`. MLE under Bernoulli noise = cross-entropy. No closed form; solve with gradient descent / Newton's method (IRLS).
+- Both belong to the **GLM family** (Generalized Linear Models), differing only by the link function (identity vs. logit) and the response distribution (Gaussian vs. Bernoulli).
+- **Why "linear"?** The decision boundary or regression surface is *linear in the inputs* — the sigmoid in logistic regression makes the output non-linear, but the boundary `w · x + b = 0` is still a hyperplane.
+- **Extending to non-linear**:
+  - Feature engineering (polynomial features, interactions).
+  - Kernelized variants (kernel logistic regression).
+  - Or, more practically, switch to GBM / DL.
+- **When linear regression is wrong**:
+  - Heteroscedastic noise (variance varies with `x`).
+  - Heavy-tailed errors (use Huber loss or quantile regression).
+  - Target is bounded or non-Gaussian (use a GLM with the right link).
+
+**Common follow-ups.**
+- "What's the gradient of logistic regression?" → `∂L/∂w = Xᵀ(p − y) / N` (clean, same shape as the softmax gradient).
+- "Why softmax for multi-class instead of one-vs-rest?" → Softmax gives a calibrated joint distribution; OvR can have inconsistencies (probabilities not summing to 1).
+
+**Common mistakes.**
+- Using linear regression for binary classification (gives unbounded predictions).
+- Treating logistic regression's output as "more confident" — it's a probability, not a margin.
+
+**References.**
+- [Bishop, *Pattern Recognition and Machine Learning*, §4.3](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/).
+- [Hastie, Tibshirani, Friedman — *Elements of Statistical Learning*, §4.4](https://hastie.su.domains/ElemStatLearn/) — logistic regression.
+
+---
