@@ -4,6 +4,7 @@
 
 # llm-interview-prep
 
+[![Live demo](https://img.shields.io/badge/live%20demo-bettyguo.github.io%2Fllm--interview--prep-6f4e37?logo=githubpages&logoColor=white)](https://bettyguo.github.io/llm-interview-prep/)
 [![License: content CC-BY-4.0 / tooling MIT](https://img.shields.io/badge/license-CC--BY--4.0%20%2F%20MIT-blue.svg)](LICENSE)
 [![Last updated](https://img.shields.io/github/last-commit/bettyguo/llm-interview-prep?label=last%20updated)](https://github.com/bettyguo/llm-interview-prep/commits/main)
 [![Stars](https://img.shields.io/github/stars/bettyguo/llm-interview-prep?style=social)](https://github.com/bettyguo/llm-interview-prep/stargazers)
@@ -29,19 +30,23 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 
 ---
 
-## Practice live — supplementary study site
+## Try the live mock-interview site
 
-For active recall on top of the question bank, [`site/`](site/) is a single-page study app with five modes:
+> **▶ https://bettyguo.github.io/llm-interview-prep/** — full question bank, five study modes, runs in your browser, no signup.
 
-| Mode | What it's for |
-|------|---------------|
-| **Browse** | Filter, search, and read every Q with full answer / follow-ups / mistakes / references. |
-| **Flashcards** | Front–back cards with Leitner spaced repetition (1d → 3d → 7d → 14d → 30d). Progress in `localStorage`. |
-| **MCQ Quiz** | Auto-generated multiple-choice: correct option is the entry's short answer; distractors are pulled from its documented **Common mistakes** — the exact failure modes interviewers listen for. |
-| **Mock Interview** | Timed sequence with self-rating (1–5) and a per-topic scorecard at the end. |
-| **Cloze** | Key terms blanked in the short answer for active recall. |
+Reading answers is passive prep. The interview itself is active recall under time pressure — so this repo ships a companion site that drills you the same way the loop will.
 
-Static, local-only (no analytics, no account). Open `site/index.html` directly, or `python tools/build_site.py && cd site && python -m http.server`. Full setup and GitHub Pages deployment notes in [`site/README.md`](site/README.md).
+| Mode | What it does | When to use it |
+|------|--------------|----------------|
+| **🔎 Browse** | Search, filter, and read all 285+ Qs with full answer / follow-ups / common mistakes / references. | First pass through a new topic. |
+| **🧠 Flashcards** | Spaced repetition (1d → 3d → 7d → 14d → 30d, Leitner-style). Rate yourself; cards you miss come back sooner. | Daily 15–30 min review across the cram weeks. |
+| **✅ MCQ Quiz** | Auto-generated 4-option questions where the **three distractors are the documented Common mistakes** for that question — the exact half-truths interviewers listen for. | Quick gap-finding: "do I actually know this or just recognize it?" |
+| **⏱ Mock Interview** | Timed sequence with notes textarea, model-answer reveal, self-rating 1–5, per-topic scorecard at the end. | Final week: pressure-test under realistic conditions. |
+| **🔤 Cloze** | Key terms blanked in the short answer. Click to reveal. | Cementing acronyms, formulas, named results. |
+
+Everything is **static** (no backend), **local-only** (progress in `localStorage`, no account, no analytics), and **auto-deployed** from `main` — when contributors add a question to `prep/`, the live site picks it up on the next push.
+
+→ **[Open the live site](https://bettyguo.github.io/llm-interview-prep/)** · run it offline with `python tools/build_site.py && open site/index.html` · setup details in [`site/README.md`](site/README.md).
 
 ---
 
@@ -68,15 +73,15 @@ Static, local-only (no analytics, no account). Open `site/index.html` directly, 
 
 <!-- BUILD:STATS:START -->
 
-**Total questions:** 285
+**Total questions:** 400
 
 | # | Topic | Questions |
 |---|-------|-----------|
 | 1 | 01 — ML & DL Fundamentals | 62 |
 | 2 | 02 — Transformers & LLM Internals | 63 |
-| 3 | 03 — Training & Fine-Tuning | 22 |
-| 4 | 04 — Inference & Serving | 21 |
-| 5 | 05 — Retrieval & RAG | 21 |
+| 3 | 03 — Training & Fine-Tuning | 61 |
+| 4 | 04 — Inference & Serving | 63 |
+| 5 | 05 — Retrieval & RAG | 55 |
 | 6 | 06 — Agents & Harnesses | 20 |
 | 7 | 07 — Evaluation & Calibration | 18 |
 | 8 | 08 — ML System Design | 10 |

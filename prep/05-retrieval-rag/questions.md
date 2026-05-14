@@ -867,3 +867,1045 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Robertson & Zaragoza — BM25 reference](https://www.staff.city.ac.uk/~sb317/papers/foundations_bm25_review.pdf).
 
 ---
+
+### Q: How do you handle very large documents (>100k tokens) in RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [large-documents, chunking, summary-index]
+
+**Short answer.** Three strategies: (1) **chunk-and-retrieve** standard RAG with smaller chunks; (2) **hierarchical summary index**: per-section / per-chapter summaries indexed alongside detail chunks; route by query specificity. (3) **long-context model**: stuff the whole doc in the prompt (works only with 200k+ context models and is expensive). The right answer depends on query shape — focused lookup → RAG; cross-document synthesis → long context.
+
+**Expansion / why this is the answer.**
+- See T5 base "long-context-vs-RAG" entry for the broader frame.
+- **Summary indexes** (RAPTOR-style):
+  - Per-paragraph chunks at the leaves.
+  - Per-section summaries one level up.
+  - Per-chapter summaries above that.
+  - Per-document summary at the top.
+  - Query → which level to retrieve from.
+
+**Common follow-ups.**
+- "What's the tradeoff with hierarchical summary?" → Ingest cost (lots of LLM calls); query routing complexity.
+
+**Common mistakes.**
+- One chunk size for all documents.
+
+**References.**
+- [Sarthi et al. — "RAPTOR"](https://arxiv.org/abs/2401.18059).
+
+---
+
+### Q: What is the role of chunk-level metadata in RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [metadata, filtering, rag]
+
+**Short answer.** Metadata (source URL, document type, publication date, ACL group, language, custom tags) attached to each chunk enables: (a) **pre-filter** retrieval (only show docs the user is authorized to see); (b) **time-window filtering** (recent only); (c) **citation generation** (link the answer to the source); (d) **hybrid retrieval scoring** (boost recent / authoritative). Critical in production RAG; vanilla "embed and search" misses it.
+
+**Expansion / why this is the answer.**
+- Metadata fields typically tracked:
+  - `doc_id`, `chunk_id`.
+  - `source_url`, `title`.
+  - `created_at`, `updated_at`.
+  - `acl_groups`: who can see this.
+  - `language`.
+  - `domain` / `category`.
+  - Custom: `tags`, `priority`, `confidence`.
+- Vector indexes (Qdrant, Weaviate, pgvector) support metadata filtering at query time.
+- ACL filtering is **critical** — wrong-access in RAG is a security incident.
+
+**Common follow-ups.**
+- "How do you handle per-tenant data?" → ACL filtering on every query.
+- "Filtering performance?" → Pre-filter (compute ANN over the filtered subset) is more expensive than post-filter; tradeoffs.
+
+**Common mistakes.**
+- Storing no metadata; embedding the whole text and losing the per-chunk handles.
+
+**References.**
+- [Qdrant docs — filtering](https://qdrant.tech/documentation/concepts/filtering/).
+
+---
+
+### Q: How would you build a retrieval system for code (function-level)?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [code-search, code-retrieval, function-level]
+
+**Short answer.** Three sources: (1) **semantic search** via code-aware embeddings; (2) **symbol search** via tree-sitter or LSP — exact name lookups for `getUserById`; (3) **call-graph traversal** for related functions. Chunk at function/class boundary, not character count. Use a code-trained embedder (Voyage code-2, CodeRankEmbed) — general-text embedders perform poorly on code. Fuse with RRF.
+
+**Expansion / why this is the answer.**
+- See T5 base "code search system" entry for fuller treatment.
+- Function-level chunking specifically:
+  - Tree-sitter or LSP to identify function boundaries.
+  - Each chunk: function signature + docstring + body.
+  - Metadata: file path, language, lines.
+
+**Common follow-ups.**
+- "Why not chunk by line count?" → Splits functions; breaks symbol resolution.
+- "Cross-language search?" → Multi-lingual code embedding model.
+
+**Common mistakes.**
+- Pure-text embedder on code — fails on exact-name and structure queries.
+
+**References.**
+- [Voyage code-2](https://docs.voyageai.com/docs/embeddings).
+
+---
+
+### Q: What is "MMR" (maximal marginal relevance) reranking, and when do you use it?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [mmr, diversity, reranking]
+
+**Short answer.** MMR (Carbonell & Goldstein 1998): a reranking criterion that balances *relevance* with *diversity* — pick the next result to maximize relevance to the query minus similarity to already-selected results. Useful when you want diverse top-K (different perspectives, multi-faceted query) rather than near-duplicates of the top-1.
+
+**Expansion / why this is the answer.**
+- Formula: `MMR(c) = λ · sim(c, query) − (1−λ) · max_{d ∈ S} sim(c, d)` where `S` is the already-selected set.
+- `λ` ∈ [0, 1]: 1 = pure relevance; 0 = pure diversity.
+- Typical use: top-10 with `λ = 0.7` — mostly relevance, some diversity.
+- **When useful**:
+  - Search results page: show multiple perspectives.
+  - RAG: avoid 5 near-duplicate chunks from the same source.
+- **When not**: pure single-answer Q&A where you want the most relevant chunk.
+
+**Common follow-ups.**
+- "How does MMR compare to clustering?" → MMR picks during retrieval; clustering picks after.
+- "λ tuning?" → Held-out eval set.
+
+**Common mistakes.**
+- Skipping MMR-like deduplication on the same-source chunks.
+
+**References.**
+- [Carbonell & Goldstein — "MMR"](https://www.cs.cmu.edu/~jgc/publication/The_Use_MMR_Diversity_Based_LTMIR_1998.pdf).
+
+---
+
+### Q: What is "Cohere Rerank" / cross-encoder rerank as a service?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [reranking, cohere, voyage]
+
+**Short answer.** A managed cross-encoder rerank API (Cohere Rerank, Voyage rerank, Jina): provide a query and a list of candidate documents; receive a relevance-sorted list with scores. Saves you the work of hosting your own cross-encoder. Trade-off: latency hit per call (50–200 ms typical); cost. Production RAG often uses these.
+
+**Expansion / why this is the answer.**
+- **API call shape**: `rerank(query, documents) → ranked_list_with_scores`.
+- **Vendors**:
+  - **Cohere Rerank-3**: multilingual, fast.
+  - **Voyage rerank-2-lite**: general purpose.
+  - **Jina Reranker**: open-source-friendly.
+- **Self-host option**: BGE-reranker (open source, BAAI).
+- **When to use API**:
+  - Don't want to manage GPU serving for the reranker.
+  - Modest scale.
+- **When to self-host**:
+  - Sustained high volume.
+  - Privacy / on-prem.
+
+**Common follow-ups.**
+- "Cost-quality tradeoff?" → API: $0.001–0.01 per query. Self-hosted: amortized.
+- "Why dedicated rerank?" → Quality wins over dual-encoder-only retrieval; necessary for production RAG.
+
+**Common mistakes.**
+- Skipping the rerank step; top-k dense is too noisy.
+
+**References.**
+- [Cohere Rerank docs](https://docs.cohere.com/docs/rerank-overview).
+
+---
+
+### Q: What's the difference between "passage retrieval" and "document retrieval"?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [passage-retrieval, document-retrieval, granularity]
+
+**Short answer.** **Document retrieval**: return whole documents; user navigates within. **Passage retrieval**: return the specific span (paragraph, section) that answers the query. Modern RAG is passage retrieval — chunks are passage-sized. Document retrieval is the classical IR setup (web search returning URLs).
+
+**Expansion / why this is the answer.**
+- **Document retrieval**: TF-IDF / BM25 on full-doc indices; web search.
+- **Passage retrieval**: index each chunk; return ranked passages.
+- **RAG specifically uses passage retrieval** because the LLM ingests the passages as context.
+- **Hybrid pattern**: passage retrieval; on user request for more context, expand to the parent document.
+
+**Common follow-ups.**
+- "Why not always passages?" → Doc-level is appropriate for web-search use; passage is for question-answering.
+
+**Common mistakes.**
+- Conflating the two; they have different evaluation metrics.
+
+**References.**
+- [Manning, Raghavan, Schütze — *IR*](https://nlp.stanford.edu/IR-book/) — classical IR.
+
+---
+
+### Q: How does Cohere's Rerank-3 differ from a generic cross-encoder?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [cohere-rerank, cross-encoder, multilingual]
+
+**Short answer.** Cohere Rerank-3 is multilingual, instruction-aware, and trained on diverse retrieval pairs. Generic cross-encoders (e.g. `cross-encoder/ms-marco-MiniLM-L-12-v2`) are typically English-only and trained on a single dataset. Cohere Rerank-3 also returns calibrated relevance scores (not just rankings). For production multilingual RAG, the difference is meaningful.
+
+**Expansion / why this is the answer.**
+- **Generic cross-encoder**:
+  - MS MARCO trained; English; specific style.
+  - Lightweight; fast.
+- **Cohere Rerank-3**:
+  - 100+ languages.
+  - Instruction-aware (knows it's reranking).
+  - Calibrated scores.
+- **BGE-reranker** (open-source): competitive on English; multilingual variants exist.
+
+**Common follow-ups.**
+- "When to use Rerank-3 vs BGE?" → Multilingual / instruction-aware → Cohere; English-only / on-prem → BGE.
+
+**Common mistakes.**
+- Reranking with an English-only model on multilingual content.
+
+**References.**
+- [Cohere Rerank documentation](https://docs.cohere.com/docs/rerank-overview).
+- [BGE-reranker](https://huggingface.co/BAAI/bge-reranker-v2-m3).
+
+---
+
+### Q: What is "dense passage retrieval" historically vs. modern embeddings?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [dpr, dense-retrieval, history]
+
+**Short answer.** DPR (Dense Passage Retrieval, Karpukhin et al. 2020) was the canonical dense-retrieval paper: dual-encoder BERT trained with contrastive loss on question-passage pairs (Natural Questions, TriviaQA). Modern embeddings (E5, BGE, OpenAI text-embedding-3, Cohere embed-v3) follow the same architecture but with better training data, larger model size, instruction-tuning, and multilingual capability. DPR set the template; modern is the descendant.
+
+**Expansion / why this is the answer.**
+- **DPR (2020)**:
+  - BERT-base dual-encoder.
+  - Trained on (question, positive passage) + in-batch negatives.
+  - Outperformed BM25 on open-domain QA.
+- **Modern improvements**:
+  - Larger backbones (LLM-based; E5-Mistral).
+  - Better data curation (MTEB-tuned mixtures).
+  - Hard negatives mining.
+  - Instruction prefix ("Query: ..." vs. "Document: ...").
+  - Multilingual.
+- **Quality gap**: DPR vs. modern is large; MTEB leaderboard shows the progress.
+
+**Common follow-ups.**
+- "Is DPR still used in production?" → Rarely; modern embeddings dominate.
+- "Why the architecture didn't change much?" → Dual-encoder is fundamentally right; the gains came from data and scale.
+
+**Common mistakes.**
+- Citing DPR as "best-in-class" — it's foundational but superseded.
+
+**References.**
+- [Karpukhin et al. — "DPR"](https://arxiv.org/abs/2004.04906).
+- [Wang et al. — "E5"](https://arxiv.org/abs/2212.03533).
+
+---
+
+### Q: What is "hard negative mining" for retrieval training?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [hard-negatives, contrastive, training]
+
+**Short answer.** Hard negatives: documents that are *similar to but not the gold answer* for a query. Training with hard negatives (not just random ones) teaches the retriever to make fine distinctions. Standard mining: use BM25 or a weak retriever to find candidates near the gold; pick the top-K non-gold as negatives. Modern recipe used by E5, BGE, etc.
+
+**Expansion / why this is the answer.**
+- The intuition: random negatives are too easy; the retriever needs to learn near-misses.
+- **Mining process**:
+  - For each `(query, positive)` pair:
+    - Retrieve top-K candidates with a weaker retriever.
+    - Filter out the positive.
+    - Use the remaining top-K as hard negatives.
+- **Multiple rounds**: as the retriever improves, re-mine; the new model finds new hard negatives.
+- **Empirical**: hard negatives improve MTEB scores significantly over random negatives.
+- **Caveats**: false negatives — sometimes the "hard negative" is actually a valid answer; quality control needed.
+
+**Common follow-ups.**
+- "What's a 'false negative' in this context?" → A doc labeled as negative that's actually relevant.
+- "How many hard negatives per query?" → 7–63 typical; in-batch + mined.
+
+**Common mistakes.**
+- Random-only negatives in training.
+
+**References.**
+- [Xiong et al. — "Approximate Nearest Neighbor Negative Contrastive Learning" (ANCE)](https://arxiv.org/abs/2007.00808).
+
+---
+
+### Q: How does RAG handle "out of distribution" queries?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [ood, refusal, rag]
+
+**Short answer.** OOD queries (the corpus doesn't contain the answer) should result in: (a) retrieval returning low-relevance results; (b) the LLM detecting low support; (c) explicit refusal: "I couldn't find that in the documentation." Implementations: low-confidence threshold from the reranker; LLM-judge verification step; explicit "supported / not supported" output from the model.
+
+**Expansion / why this is the answer.**
+- **Failure mode**: model invents an answer (hallucination) when retrieval returns poor matches.
+- **Detection**:
+  - **Reranker score threshold**: if top-1 below threshold, OOD.
+  - **LLM self-evaluation**: prompt the model to say whether the retrieved docs support an answer.
+  - **Self-RAG-style** training: model emits explicit `[Unsupported]` tokens.
+- **Action on OOD**:
+  - Refuse: "I don't have information about that."
+  - Escalate to human / web search.
+- **User trust**: explicit refusal is better than confident-wrong.
+
+**Common follow-ups.**
+- "How do you tune the threshold?" → Held-out OOD set; measure refusal accuracy vs. over-refusal.
+- "Why is over-refusal bad?" → User experience: model says "I don't know" when it actually could answer.
+
+**Common mistakes.**
+- No OOD detection; model confabulates.
+
+**References.**
+- [Asai et al. — "Self-RAG"](https://arxiv.org/abs/2310.11511).
+
+---
+
+### Q: What is "context distillation" / context compression for RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [context-compression, distillation, llmlingua]
+
+**Short answer.** Compress retrieved context before passing to the LLM. Methods: (a) **LLMLingua** (Jiang et al. 2023) — use a small LLM to predict per-token importance; drop low-importance tokens; (b) **summarization** — small model summarizes each chunk; (c) **selective extraction** — only keep sentences directly relevant to the query. Trade-off: cost-vs-quality; can lose nuance.
+
+**Expansion / why this is the answer.**
+- **LLMLingua / LongLLMLingua**:
+  - Small LLM scores tokens for "perplexity contribution."
+  - Drop low-contribution tokens.
+  - 2–10× compression at modest quality cost.
+- **Summary-based**:
+  - Each retrieved chunk summarized to N tokens.
+  - Pass summaries to the main LLM.
+- **Use cases**:
+  - Very long contexts that don't fit.
+  - Cost-sensitive workloads.
+- **When to skip**:
+  - Long-context models with prompt caching handle this well.
+
+**Common follow-ups.**
+- "Quality cost?" → 5–15% on standard RAG benchmarks; depends on compression ratio.
+
+**Common mistakes.**
+- Compressing when the model has plenty of context budget.
+
+**References.**
+- [Jiang et al. — "LLMLingua"](https://arxiv.org/abs/2310.05736).
+
+---
+
+### Q: What is "query routing" in RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [query-routing, multi-index]
+
+**Short answer.** A classifier routes each query to the right index: e.g. "support questions" → product docs index; "math homework" → math textbook index; "code question" → code-search index. Cheap routing (rule-based or small classifier) lets you scale RAG across multiple specialized corpora without a single mega-index.
+
+**Expansion / why this is the answer.**
+- **Why route**:
+  - Indices have different costs, freshness, and ACL needs.
+  - Different embedding models for different domains (code vs. text).
+  - Avoid contaminating results across domains.
+- **Routing options**:
+  - **Rule-based**: regex / keyword match (cheap; brittle).
+  - **Classifier**: small ML model on labeled `(query, index)` pairs.
+  - **LLM-based**: cheap LLM as router.
+- **Multi-index parallel**: route to multiple indices and fuse (more expensive but handles ambiguous queries).
+
+**Common follow-ups.**
+- "When does multi-index fusion win?" → Ambiguous queries that span domains.
+- "Router error mode?" → Mis-routing → wrong index → bad retrieval → bad answer.
+
+**Common mistakes.**
+- Static rules in a fast-evolving system; data-drift breaks them.
+
+**References.**
+- [Jeong et al. — "Adaptive-RAG"](https://arxiv.org/abs/2403.14403) — routing variant.
+
+---
+
+### Q: How would you eval retrieval quality without labeled data?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [unsupervised-eval, synthetic-eval]
+
+**Short answer.** Synthetic evaluation: for each known document, use an LLM to generate a question whose answer is in that document. Now you have a labeled `(query, gold_doc)` pair. Compute recall@k and MRR on the synthetic set. Noisy but cheap; useful for relative comparison of retrieval methods. Hand-validate a subset for calibration.
+
+**Expansion / why this is the answer.**
+- **The workflow**:
+  - Sample N documents from your corpus.
+  - For each: LLM generates a focused question whose answer is in that doc.
+  - Now you have (synthetic question, gold doc).
+  - Run retrieval; measure recall@k.
+- **Quality**:
+  - Synthetic queries don't match real-user queries perfectly.
+  - But: useful for relative comparison ("does the new embedding beat the old?").
+- **Calibration**:
+  - Hand-validate 50–100 of the synthetic pairs.
+  - Verify the LLM's generated questions are actually answered by the gold doc.
+
+**Common follow-ups.**
+- "Can you do this for production monitoring?" → Yes; continuous synthetic-eval signals retriever quality.
+- "What's the alternative?" → Hand-labeled set (expensive); user-feedback signals (sparse).
+
+**Common mistakes.**
+- Trusting synthetic eval without calibration.
+
+**References.**
+- [Bonifacio et al. — "InPars"](https://arxiv.org/abs/2202.05144) — synthetic queries for retrieval training.
+
+---
+
+### Q: What is "fusion-in-decoder" (FiD)?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [fid, encoder-decoder-rag, izacard]
+
+**Short answer.** FiD (Izacard & Grave 2020): a RAG architecture for encoder-decoder models (T5). Each retrieved passage is encoded independently; their outputs are concatenated and attended over by the decoder. Decoupling passage encoding (parallel) from decoding (autoregressive) makes FiD scale better than putting all passages in one encoder.
+
+**Expansion / why this is the answer.**
+- **Standard concat-then-encode**: stuff all passages into the encoder; encode together; decode.
+- **FiD**: encode each passage *independently*; decoder cross-attends to the concatenation of encoder outputs.
+- **Advantages**:
+  - Parallel encoding of passages.
+  - Scales to many passages (10+).
+  - Used in Atlas, RETRO variants.
+- **For decoder-only LLMs**: FiD doesn't directly apply (no encoder); the equivalent is just putting passages in the prompt.
+
+**Common follow-ups.**
+- "Why not used much in 2026?" → Decoder-only LLMs dominate; FiD requires encoder-decoder.
+- "Does FiD match modern RAG quality?" → On classical QA benchmarks, competitive; less so for modern long-context tasks.
+
+**Common mistakes.**
+- Citing FiD as the modern RAG default — it's an encoder-decoder pattern.
+
+**References.**
+- [Izacard & Grave — "FiD"](https://arxiv.org/abs/2007.01282).
+
+---
+
+### Q: What is "RAG fusion" / multi-query retrieval?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [rag-fusion, multi-query]
+
+**Short answer.** Multi-query RAG: from the user's query, generate `k` paraphrased queries with an LLM; retrieve top-N for each; merge with RRF; pass to the generator. Captures more semantic angles than a single query; helps on ambiguous or under-specified questions. Cost: an extra LLM call (cheap if small).
+
+**Expansion / why this is the answer.**
+- **The pipeline**:
+  - User query → LLM generates 3–5 paraphrases / rewordings.
+  - Retrieve top-N for each.
+  - Union and RRF.
+  - Rerank top-K.
+- **Compared to HyDE**: HyDE generates a hypothetical *answer*; multi-query generates rewordings of the *question*.
+- **When this wins**:
+  - Vague / under-specified queries.
+  - Domain language mismatch (user says "stomach pain"; docs say "abdominal discomfort").
+
+**Common follow-ups.**
+- "Combination with HyDE?" → Yes; do both; expensive but covers more.
+- "Cost vs benefit?" → 1 extra LLM call (cheap with a small model); typically worth it.
+
+**Common mistakes.**
+- Treating multi-query as universally beneficial; on focused queries, it adds noise.
+
+**References.**
+- [Anthropic — Contextual Retrieval blog](https://www.anthropic.com/news/contextual-retrieval).
+
+---
+
+### Q: What is "contextual retrieval" / Anthropic's approach?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [contextual-retrieval, anthropic]
+
+**Short answer.** Anthropic's Contextual Retrieval (Sep 2024): before embedding each chunk, prepend a 50–100 token context describing where the chunk sits in its document ("This is from the 'Pricing' section of the Acme product manual..."). Then embed. Improves retrieval recall ~35% by giving the chunk-level vector enough context to be findable. Pair with hybrid (BM25 + dense) for additional gains.
+
+**Expansion / why this is the answer.**
+- **The problem**: small chunks lose context. "It supports up to 500 users." — what's "it"?
+- **The fix**: prepend chunk-specific context generated by an LLM that sees the whole document.
+- **Pipeline**:
+  - Ingest: each chunk → LLM generates a 50–100 token context → prepend → embed.
+  - Query: standard.
+- **Cost**: LLM call per chunk at ingest; prompt-caching makes this affordable (the document is the cache).
+- **Anthropic-reported gains**:
+  - Pure dense: baseline.
+  - Contextual: +35% retrieval failure rate reduction.
+  - + BM25 + RRF: even better.
+  - + reranking: best.
+
+**Common follow-ups.**
+- "Cost at scale?" → With prompt caching, the per-chunk LLM call is cheap (the document text is cached).
+- "Why isn't this universal?" → New (2024); requires LLM ingest pipeline; many teams haven't migrated.
+
+**Common mistakes.**
+- Skipping the context-prefix; small chunks alone lose meaning.
+
+**References.**
+- [Anthropic — "Introducing Contextual Retrieval"](https://www.anthropic.com/news/contextual-retrieval).
+
+---
+
+### Q: How do you A/B test a RAG improvement in production?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [ab-test, rag-eval, production]
+
+**Short answer.** (1) Define the metric (deflection, CSAT, time-to-resolution). (2) Bucket users 50/50 to control (old RAG) vs treatment (new RAG). (3) Hold for sufficient sample size (calculated via power analysis). (4) Monitor guardrails (latency, error rate). (5) Decide: ship if metric improves and guardrails unchanged; rollback if either regresses; iterate. Use offline eval first to filter clear losers before online tests.
+
+**Expansion / why this is the answer.**
+- See T7 A/B testing entries for the broader frame.
+- RAG-specific signals:
+  - Retrieval recall (offline).
+  - Faithfulness (offline, LLM-judge).
+  - User thumbs up/down (online).
+  - Refusal rate.
+  - Session-level metrics.
+
+**Common follow-ups.**
+- "What's a typical RAG A/B duration?" → 1–4 weeks depending on traffic.
+- "Multi-variant?" → Yes — multiple new variants vs. control; correct for multiple testing.
+
+**Common mistakes.**
+- Skipping the offline gate; A/B-testing clear losers wastes traffic.
+
+**References.**
+- [Kohavi et al. — *Trustworthy Online Controlled Experiments*](https://experimentguide.com/).
+
+---
+
+### Q: What is "negative caching" in RAG production?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [negative-cache, ood, monitoring]
+
+**Short answer.** Track queries that consistently fail retrieval (no high-confidence match in the index). Negative caching: store these queries; periodically review to determine: (a) Should they be added to the corpus? (b) Should the model refuse more politely? (c) Is the retrieval failing on the corpus, or is it truly out-of-scope? Feedback loop for content expansion.
+
+**Expansion / why this is the answer.**
+- **Why**: queries that the corpus can't answer should be visible; they're product-improvement opportunities or refusal-tuning opportunities.
+- **Implementation**:
+  - Log queries where top-K retrieval scores are all below threshold.
+  - Periodic review (weekly).
+  - Tag: "add to corpus," "out of scope," "phrasing issue (rewrite query)."
+- **Closes the loop**:
+  - Corpus growth.
+  - Better refusal training.
+
+**Common follow-ups.**
+- "Privacy?" → Queries may contain PII; redact or aggregate before review.
+- "Volume?" → Production logs of OOD queries can be huge; sample.
+
+**Common mistakes.**
+- Just ignoring the OOD queries; missing the product-improvement signal.
+
+**References.**
+- [Barnett et al. — "Seven Failure Points When Engineering a RAG System"](https://arxiv.org/abs/2401.05856).
+
+---
+
+### Q: Compare BM25, dense-only, ColBERT, and hybrid retrieval on a specific corpus.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [retrieval-comparison, hybrid]
+
+**Short answer.** Concrete pattern: on a corpus of help docs with mixed exact-name (products) and abstract (concepts) queries:
+- **BM25**: nails exact-name queries; fails on paraphrases.
+- **Dense-only** (BGE / E5): nails paraphrases; misses exact names.
+- **ColBERT**: best precision at low K; storage cost.
+- **Hybrid BM25 + dense + RRF**: combines strengths; production default. Add reranker on top of any: another 5–15 nDCG points.
+
+**Expansion / why this is the answer.**
+- See T5 base hybrid retrieval entry for fuller treatment.
+- The summary table is the interview-grade quick answer.
+
+**Common follow-ups.**
+- "When does dense-only suffice?" → Homogeneous semantic corpus; no exact-name traffic.
+- "When does BM25-only suffice?" → Highly structured corpus (legal cases, product SKUs).
+
+**Common mistakes.**
+- Dense-only because it's "modern" — leaves performance on the table.
+
+**References.**
+- [Robertson & Zaragoza — BM25](https://www.staff.city.ac.uk/~sb317/papers/foundations_bm25_review.pdf).
+- [Cormack et al. — "RRF"](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf).
+
+---
+
+### Q: How do you handle "the user wants A but the doc says B" contradictions in RAG?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [contradictions, faithfulness]
+
+**Short answer.** RAG's job: ground the answer in the retrieved docs. If the user's premise contradicts the docs (e.g. "my plan has feature X" but the docs say it doesn't), the model should explicitly flag the discrepancy: "Based on the documentation, plan X doesn't include feature Y; you may be thinking of plan Z." Don't agree with the user when the docs say otherwise.
+
+**Expansion / why this is the answer.**
+- **Failure modes**:
+  - **Sycophancy**: model agrees with the user's wrong premise.
+  - **Hallucination**: model invents a way to confirm the user's claim.
+- **Correct behavior**:
+  - Acknowledge the user's framing.
+  - Cite what the docs say.
+  - Resolve the discrepancy: "I think there may be confusion."
+- **Training**: include preference pairs where confirming the user's wrong premise is the rejected option.
+
+**Common follow-ups.**
+- "How do you measure sycophancy?" → Adversarial eval set with deliberately-wrong user premises.
+- "What if the docs are wrong?" → Outside the model's scope; escalate; flag to the corpus owner.
+
+**Common mistakes.**
+- Optimizing only on user satisfaction (CSAT) — encourages sycophancy.
+
+**References.**
+- [Sharma et al. — "Sycophancy in LLMs"](https://arxiv.org/abs/2310.13548).
+
+---
+
+### Q: What's "self-querying retrieval"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [self-query, structured-filtering]
+
+**Short answer.** The LLM examines the user query and constructs a *structured query* over the index — both a semantic search term and metadata filters. For "show me articles about RAG from 2024," the LLM produces: `search_text="RAG", filter={"year": 2024}`. Combines semantic and exact filtering in one step.
+
+**Expansion / why this is the answer.**
+- The pipeline:
+  - User query.
+  - LLM extracts: semantic content + metadata constraints.
+  - Combined query: vector search + metadata filter.
+- **Helps when**: queries naturally include filters (dates, categories, languages).
+- **Implementations**: LangChain's `SelfQueryRetriever`, custom code with structured-output LLM calls.
+
+**Common follow-ups.**
+- "What if the LLM mis-extracts filters?" → Validation step; fall back to pure semantic search.
+- "Cost?" → One small LLM call per query.
+
+**Common mistakes.**
+- Hard-coding filter rules instead of LLM extraction — brittle.
+
+**References.**
+- [LangChain Self-Querying docs](https://python.langchain.com/docs/how_to/self_query/).
+
+---
+
+### Q: What is "step-back prompting" for RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [step-back, retrieval-augmentation]
+
+**Short answer.** Step-back prompting (Zheng et al. 2023): before retrieving for a specific question, the LLM generates a more *general* version of the question ("What are the principles of X?" before "Why did X behave like Y in 2023?"). Retrieve both the specific and general queries; the general one often surfaces relevant background that direct retrieval misses.
+
+**Expansion / why this is the answer.**
+- **The technique**:
+  - Original Q: specific.
+  - LLM generates: "step back to the general question."
+  - Retrieve for both; combine.
+- **When it helps**: questions with implicit context the user didn't articulate.
+- **Cost**: one extra LLM call + one extra retrieval round.
+
+**Common follow-ups.**
+- "Relation to multi-query?" → Step-back generates a *more general* query; multi-query generates *paraphrased* queries.
+- "Empirical wins?" → Step-back paper shows gains on STEM-QA and complex reasoning.
+
+**Common mistakes.**
+- Step-back on already-general queries; redundant.
+
+**References.**
+- [Zheng et al. — "Take a Step Back"](https://arxiv.org/abs/2310.06117).
+
+---
+
+### Q: How do you handle "table-heavy" documents (e.g. financial reports) in RAG?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tables, document-structure, parsing]
+
+**Short answer.** Two-step ingestion: (a) **structured parser** (LlamaParse, Unstructured, Azure Document Intelligence) extracts tables as structured data, not flat text; (b) **table-aware chunking**: each table becomes its own chunk; cells preserved; surrounding context (caption + adjacent paragraphs) included. At retrieval: separate index for tabular content. Generic chunkers destroy table structure; this is a common failure mode.
+
+**Expansion / why this is the answer.**
+- **The problem**: a PDF's table flattens to row-major or column-major text; cells lose alignment.
+- **Modern parsers**:
+  - **LlamaParse** (LlamaIndex): structured PDF → markdown tables.
+  - **Unstructured.io**: open-source parser with table extraction.
+  - **Azure Document Intelligence**: cloud service.
+- **Chunking**:
+  - Tables as discrete chunks.
+  - Include caption + surrounding paragraphs as context.
+- **Retrieval**:
+  - Embeddings can be on the markdown-table; cross-encoder rerank.
+  - LLM presented with the structured markdown table.
+- **For numerical Q&A** (financial figures): consider a code-interpreter step over the structured table.
+
+**Common follow-ups.**
+- "PDFs with images of tables?" → OCR + table extraction; messier; current OCR systems vary.
+- "Excel files?" → Direct parsing; one chunk per worksheet or per logical table.
+
+**Common mistakes.**
+- Generic chunking destroys tables.
+
+**References.**
+- [LlamaParse docs](https://docs.cloud.llamaindex.ai/llamaparse/getting_started).
+- [Unstructured.io](https://unstructured.io/).
+
+---
+
+### Q: What is "agentic-chunking" / late chunking?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [late-chunking, agentic-chunking, jina]
+
+**Short answer.** **Late chunking** (Jina, Günther et al. 2024): embed the *full document* with a long-context encoder, then chunk *the embeddings* (not the text). Each chunk's embedding inherits global context from the whole document. Solves the "chunks lose context" problem at the embedding-model level rather than via prompt engineering (contextual retrieval).
+
+**Expansion / why this is the answer.**
+- **Standard chunking** (early): chunk text → embed each chunk independently. Each chunk's embedding has no document-level context.
+- **Late chunking**: embed the full document → pool the embedding over each chunk's token span. Each chunk's pooled embedding reflects the document context.
+- **Requirement**: long-context encoder (8k+).
+- **Variants**:
+  - Late chunking with a long-context encoder.
+  - Contextual retrieval (Anthropic): prepend context text before embedding (still early chunking).
+- **Comparison**: late chunking is model-side; contextual retrieval is data-side.
+
+**Common follow-ups.**
+- "Performance comparison?" → Both improve over naive chunking; late chunking is simpler at ingest but needs a long-context encoder.
+
+**Common mistakes.**
+- Conflating late chunking with contextual retrieval; different mechanisms.
+
+**References.**
+- [Jina AI — "Late Chunking"](https://arxiv.org/abs/2409.04701).
+
+---
+
+### Q: How do you handle "stale documents" in RAG?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [staleness, doc-update, indexing]
+
+**Short answer.** Track `updated_at` per doc; re-embed and re-index when content changes. Versioning: keep doc versions or replace. Stale-detection: periodically scan source for changes; pipeline triggers re-ingest. For time-sensitive queries, filter or boost by recency. For privacy/PII removal: explicit deletion from the index (and any caches).
+
+**Expansion / why this is the answer.**
+- **Re-ingest pipeline**:
+  - Detect changed docs (file mtime, hash, source API webhook).
+  - Re-embed changed chunks.
+  - Replace in the index.
+- **Versioning**:
+  - Replace: simple; lose history.
+  - Version with date: keep history; queries can filter by version.
+- **For RAG with citations**: ensure the citation links to the version that was retrieved.
+- **Deletion (GDPR, right-to-be-forgotten)**:
+  - Remove from index.
+  - Remove from any cached results.
+  - Audit log of deletions.
+
+**Common follow-ups.**
+- "Incremental re-embedding?" → Yes — only re-embed changed chunks.
+- "What about cached responses?" → Invalidate on doc update.
+
+**Common mistakes.**
+- No incremental updates; periodic full re-index wastes resources.
+
+**References.**
+- [LlamaIndex updating docs](https://docs.llamaindex.ai/en/stable/module_guides/indexing/document_management/).
+
+---
+
+### Q: How does Anthropic's "Citations API" actually validate citations?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [citations, anthropic, attribution]
+
+**Short answer.** Anthropic's Citations API: when you provide documents, Claude can output structured citations that include the *specific passage* the citation refers to. The API validates that citations reference actual passages in the supplied documents — preventing the model from inventing fake citations. Output is a structured `[{text, citation: {document_index, start_char, end_char, source_text}}]`.
+
+**Expansion / why this is the answer.**
+- Input: list of documents + user query.
+- Output: structured response with per-sentence citations.
+- Each citation: which document, what character range in that doc.
+- The API checks: does the citation range actually exist in the provided document? If not, the API rejects the citation.
+- Doesn't validate *semantic correctness* (whether the citation actually supports the claim) — only structural existence.
+
+**Common follow-ups.**
+- "Does it prevent hallucinated citations?" → Structural ones, yes; semantic ones, partially (the model is trained to cite faithfully).
+- "Versus parsing citations from free text?" → API is structured; less brittle.
+
+**Common mistakes.**
+- Trusting the model's free-text citations without API validation.
+
+**References.**
+- [Anthropic — Citations API docs](https://docs.anthropic.com/en/docs/build-with-claude/citations).
+
+---
+
+### Q: What's "RAG over private data" / on-prem RAG architecture?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [on-prem, private-rag, enterprise]
+
+**Short answer.** Enterprise on-prem RAG: all components run inside the organization's perimeter. Components: (a) document parsing on-prem; (b) embedding model self-hosted (BGE, E5, or a fine-tune); (c) vector store on-prem (Qdrant, Weaviate, pgvector); (d) reranker self-hosted (BGE-reranker); (e) LLM self-hosted (Llama, Mistral, Mixtral) or via private cloud (Azure OpenAI with VNet). Strict ACL on every layer.
+
+**Expansion / why this is the answer.**
+- **Requirements**:
+  - No data leaves the perimeter.
+  - Audit logs for compliance.
+  - ACL respected at every layer.
+- **Component choices**:
+  - **Embedding**: BGE-large, E5-large, mxbai-embed-large (open-source).
+  - **Vector store**: Qdrant, Weaviate, pgvector, Milvus.
+  - **Reranker**: BGE-reranker.
+  - **LLM**: Llama 3, Mistral, Mixtral, DeepSeek-V3 on internal GPUs.
+- **Hybrid**: some teams use cloud LLM (Anthropic with HIPAA / SOC2 / private cloud) + on-prem retrieval.
+- **ACL**:
+  - At ingest: tag each chunk with allowed-roles.
+  - At retrieval: filter by user's roles.
+  - At LLM: ensure no out-of-ACL content in the prompt.
+
+**Common follow-ups.**
+- "Why on-prem over private cloud?" → Strictest data sovereignty; some regulated industries require it.
+- "Performance on-prem vs. cloud?" → Often slower; offset by data-sovereignty wins.
+
+**Common mistakes.**
+- ACL only at the UI layer; the index must enforce it.
+
+**References.**
+- [Anthropic — Enterprise SOC 2 docs](https://www.anthropic.com/trust).
+- [Qdrant docs — security](https://qdrant.tech/documentation/guides/security/).
+
+---
+
+### Q: What is "semantic-aware chunking" via embeddings?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [semantic-chunking, sentence-similarity]
+
+**Short answer.** Semantic chunking: embed each sentence; split documents at points where adjacent sentences are semantically dissimilar (low embedding cosine). Reflects topical shifts rather than fixed character counts. Implementations: LlamaIndex's `SemanticSplitterNodeParser`. Modest quality gains; higher ingest cost.
+
+**Expansion / why this is the answer.**
+- **The technique**:
+  - Embed each sentence.
+  - Compute adjacent sentence similarity.
+  - Find local minima (topical boundaries).
+  - Split there.
+- **Tuning**:
+  - Threshold (percentile of similarity scores) controls chunk size.
+  - Buffer: keep adjacent sentences for context.
+- **Cost**: more embedding calls at ingest.
+- **Quality**:
+  - Better when documents have clear topical structure (essays, articles).
+  - Marginal on uniform text (code, manuals).
+
+**Common follow-ups.**
+- "Does it beat recursive splitting?" → Often by a small margin; tune on your corpus.
+
+**Common mistakes.**
+- Always using semantic chunking; cost rarely justifies it for uniform corpora.
+
+**References.**
+- [LlamaIndex Semantic Splitter docs](https://docs.llamaindex.ai/en/stable/module_guides/loading/node_parsers/modules/).
+
+---
+
+### Q: How do you handle multilingual queries against a single-language corpus?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [cross-lingual, multilingual, retrieval]
+
+**Short answer.** Two approaches: (1) **Multilingual embedding model** that maps query and doc to the same space regardless of language; query in any language matches docs in the corpus language. (2) **Machine translation** at query time: detect the query language; translate to corpus language; retrieve normally. The first is cleaner; the second works when you only have an English embedder.
+
+**Expansion / why this is the answer.**
+- **Multilingual embeddings**: BGE-M3, Cohere multilingual-embed-v3, OpenAI text-embedding-3 all handle this natively.
+- **Translation pipeline**:
+  - Detect query language (langid).
+  - Translate to corpus language with NMT.
+  - Retrieve as normal.
+- **For LLM answering**:
+  - If answering in user's language: translate retrieved passages OR rely on the LLM's multilingual capability.
+
+**Common follow-ups.**
+- "Translation quality?" → Modern NMT is good; rare-language pairs less reliable.
+- "Where do biases creep in?" → Translation may shift meaning; named entities especially.
+
+**Common mistakes.**
+- English-only embedder + non-English queries; recall tanks.
+
+**References.**
+- [Chen et al. — "BGE-M3"](https://arxiv.org/abs/2402.03216).
+
+---
+
+### Q: What is "query understanding" / query classification in production search?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [query-understanding, classification]
+
+**Short answer.** Before retrieval, classify the query: (a) intent (navigational, informational, transactional); (b) entities mentioned; (c) detected language; (d) detected NSFW / abusive. Used to route to the right index, apply filters, or modify the search behavior. Standard component of production search systems.
+
+**Expansion / why this is the answer.**
+- **Components**:
+  - Intent classifier (small ML model or LLM).
+  - Named-entity recognition.
+  - Language detection.
+  - Spam / abuse filter.
+- **Use cases**:
+  - Navigational ("Acme login page"): direct to known URL, skip RAG.
+  - Informational ("what is X?"): full RAG.
+  - Transactional ("buy X"): different ranking signals.
+- **LLM-based query understanding**: structured-output LLM call returning the analysis JSON.
+
+**Common follow-ups.**
+- "Latency impact?" → 10–100ms for the classifier; sometimes parallelizable with retrieval.
+- "When does query understanding fail?" → Unusual phrasings, code-mixed languages.
+
+**Common mistakes.**
+- Skipping query understanding; one-size-fits-all retrieval misses easy wins.
+
+**References.**
+- [Manning, Raghavan, Schütze — *IR Book*](https://nlp.stanford.edu/IR-book/) — classical query analysis.
+
+---
+
+### Q: What is the role of a "query rewriter" before retrieval?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [query-rewriting, multi-turn]
+
+**Short answer.** Rewrites the user's query into a self-contained form suitable for retrieval — typically in multi-turn chats where the query references prior context ("what about its CEO?" → "what about Acme's CEO?"). Implemented by a small LLM. Critical for multi-turn RAG; vanilla retrieval doesn't handle context-dependent queries.
+
+**Expansion / why this is the answer.**
+- **The problem**: a user's follow-up question depends on prior turns; the retriever doesn't see those.
+- **The fix**: a small LLM rewrites the query, expanding pronouns and references using the conversation history.
+- **Examples**:
+  - User: "Tell me about Acme Corp."
+  - Model: [response]
+  - User: "What's its revenue?"
+  - Rewriter: "What's Acme Corp's revenue?"
+- **Implementation**: cheap LLM call; can be cached for retry scenarios.
+
+**Common follow-ups.**
+- "What if the rewriter makes a wrong inference?" → Fall back to original query if confidence is low; LLM-judge step.
+
+**Common mistakes.**
+- Naive retrieval on the raw follow-up; "What about its CEO?" returns nothing useful.
+
+**References.**
+- [Yu et al. — "Few-Shot Generative Conversational Query Rewriting"](https://arxiv.org/abs/2006.05009).
+
+---
+
+### Q: How do you handle PDFs with mixed text, tables, figures in RAG ingest?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [pdf-ingest, multimodal, parsing]
+
+**Short answer.** Use a structured-PDF parser that handles each element separately: (a) text → standard chunking; (b) tables → preserved as markdown / structured rows; (c) figures → OCR / image-caption / store separately; (d) layout → preserve hierarchy. Modern services: LlamaParse, Unstructured, Azure Document Intelligence, AWS Textract. Generic text-only extractors lose 30–50% of useful content on table/figure-heavy docs.
+
+**Expansion / why this is the answer.**
+- The challenge: PDFs are layout-rich; flattening to text loses information.
+- **Component-wise extraction**:
+  - **Text**: paragraphs, headings, lists.
+  - **Tables**: structured rows / markdown tables; preserve cell alignment.
+  - **Figures**: image; OCR if text-on-image; image-captioning model for descriptions.
+  - **Equations**: LaTeX or math markdown.
+  - **References / citations**: structured.
+- **Modern tooling**:
+  - **LlamaParse**: cloud service; multimodal; good with tables.
+  - **Unstructured.io**: open-source.
+  - **PyMuPDF / pdfplumber**: lightweight, OK for simple PDFs.
+  - **Azure Document Intelligence** / **AWS Textract**: cloud-grade.
+
+**Common follow-ups.**
+- "Cost?" → Cloud parsers: $0.01–0.10 per page.
+- "When can you skip structured parsing?" → Pure text PDFs (academic papers without figures).
+
+**Common mistakes.**
+- Default text extraction → tables and figures destroyed.
+
+**References.**
+- [LlamaParse](https://docs.cloud.llamaindex.ai/llamaparse/getting_started).
+
+---
+
+### Q: What is "RAG triad" of metrics (groundedness + answer relevance + context relevance)?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [rag-triad, evaluation, faithfulness]
+
+**Short answer.** TruLens / RAGAS-style RAG eval often centers on three metrics: **Context relevance** (are retrieved passages relevant to the query?); **Groundedness / faithfulness** (does the answer follow from the context?); **Answer relevance** (does the answer address the question?). Together they cover the three failure modes: bad retrieval, hallucination despite good retrieval, off-topic generation.
+
+**Expansion / why this is the answer.**
+- The triad:
+  1. **Context relevance**: filter step. Is the retrieved context relevant?
+  2. **Groundedness**: generation step. Does the answer stay within what context says?
+  3. **Answer relevance**: end-to-end. Does the answer address the user?
+- **All three need to be high** for a good RAG response.
+- **Measured by LLM-judge** in production; hand-calibration on a held-out set.
+
+**Common follow-ups.**
+- "What does TruLens do?" → Open-source RAG evaluation framework implementing the triad.
+
+**Common mistakes.**
+- Optimizing only end-to-end accuracy; can't diagnose what's failing.
+
+**References.**
+- [Es et al. — "RAGAS"](https://arxiv.org/abs/2309.15217).
+- [TruLens documentation](https://www.trulens.org/).
+
+---
+
+### Q: How does Anthropic's "tool-use as retrieval" pattern differ from RAG?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tool-use-as-retrieval, agentic-rag]
+
+**Short answer.** Agentic pattern: instead of pre-retrieving passages and stuffing them in the context, expose a `search_knowledge_base(query)` tool to the model; the model decides when (and what) to search. The model can iterate: search, read results, search again with a refined query. More flexible than vanilla RAG; higher latency and cost.
+
+**Expansion / why this is the answer.**
+- **Vanilla RAG**: retrieve once → generate.
+- **Tool-use as retrieval**: model decides when to search via tool calls.
+- **Benefits**:
+  - Model only searches when needed (skip on easy queries).
+  - Can issue multiple refined queries.
+  - Handles multi-hop naturally.
+- **Costs**:
+  - Multiple LLM round trips.
+  - Longer latency.
+
+**Common follow-ups.**
+- "When does tool-use beat vanilla RAG?" → Multi-hop, open-ended, exploratory queries.
+- "Production use?" → Claude with tool use; OpenAI Assistants API; agentic frameworks.
+
+**Common mistakes.**
+- Treating tool-use as universally better; for single-hop Q&A, vanilla RAG is faster.
+
+**References.**
+- [Anthropic — Tool use docs](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview).
+
+---
