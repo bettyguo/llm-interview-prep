@@ -54,7 +54,7 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 
 <!-- BUILD:STATS:START -->
 
-**Total questions:** 61
+**Total questions:** 90
 
 | # | Topic | Questions |
 |---|-------|-----------|
@@ -62,8 +62,8 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 | 2 | 02 — Transformers & LLM Internals | 16 |
 | 3 | 03 — Training & Fine-Tuning | 15 |
 | 4 | 04 — Inference & Serving | 15 |
-| 5 | 05 — Retrieval & RAG | 0 |
-| 6 | 06 — Agents & Harnesses | 0 |
+| 5 | 05 — Retrieval & RAG | 15 |
+| 6 | 06 — Agents & Harnesses | 14 |
 | 7 | 07 — Evaluation & Calibration | 0 |
 | 8 | 08 — ML System Design | 0 |
 | 9 | 09 — ML / AI Coding Questions | 0 |
