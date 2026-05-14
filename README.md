@@ -54,7 +54,7 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 
 <!-- BUILD:STATS:START -->
 
-**Total questions:** 137
+**Total questions:** 147
 
 | # | Topic | Questions |
 |---|-------|-----------|
@@ -65,7 +65,7 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 | 5 | 05 — Retrieval & RAG | 15 |
 | 6 | 06 — Agents & Harnesses | 14 |
 | 7 | 07 — Evaluation & Calibration | 12 |
-| 8 | 08 — ML System Design | 0 |
+| 8 | 08 — ML System Design | 10 |
 | 9 | 09 — ML / AI Coding Questions | 14 |
 | 10 | 10 — Research Discussion & Paper Deep-Dives | 9 |
 | 11 | 11 — Behavioral & Communication | 12 |
