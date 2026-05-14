@@ -150,5 +150,5 @@ Human review:
 
 - [Schmidt & Wiegand — "A Survey on Hate Speech Detection using Natural Language Processing"](https://aclanthology.org/W17-1101/) — text-side survey.
 - [Microsoft PhotoDNA](https://www.microsoft.com/en-us/photodna) — CSAM hash matching.
-- [Facebook AI — content understanding overview](https://ai.meta.com/blog/community-standards-report-content-moderation/) — production case study.
+- [Meta — Community Standards Enforcement Report](https://transparency.meta.com/policies/community-standards/) — production transparency reporting on moderation outcomes.
 - [Radford et al. — "CLIP"](https://arxiv.org/abs/2103.00020) — multimodal joint embedding.

@@ -509,7 +509,7 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 
 **References.**
 - [Liu et al. — "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache"](https://arxiv.org/abs/2402.02750) — aggressive KV quantization.
-- [NVIDIA — TensorRT-LLM FP8 KV cache docs](https://docs.nvidia.com/deeplearning/tensorrt-llm/) — primary docs.
+- [NVIDIA — TensorRT-LLM project](https://github.com/NVIDIA/TensorRT-LLM) — primary repo + docs.
 
 ---
 
@@ -583,6 +583,6 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 **References.**
 - [Chen et al. — "Punica: Multi-Tenant LoRA Serving"](https://arxiv.org/abs/2310.18547) — Punica.
 - [Sheng et al. — "S-LoRA"](https://arxiv.org/abs/2311.03285) — S-LoRA.
-- [vLLM multi-LoRA docs](https://docs.vllm.ai/en/latest/models/lora.html) — primary docs.
+- [vLLM project (multi-LoRA support)](https://github.com/vllm-project/vllm) — primary repo.
 
 ---

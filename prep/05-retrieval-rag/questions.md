@@ -434,7 +434,7 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 **References.**
 - [Khattab & Zaharia — "ColBERT"](https://arxiv.org/abs/2004.12832) — ColBERT.
 - [Santhanam et al. — "ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction"](https://arxiv.org/abs/2112.01488) — ColBERTv2.
-- [LlamaIndex — Parent Document Retriever docs](https://docs.llamaindex.ai/en/stable/examples/retrievers/) — small-to-big pattern.
+- [LlamaIndex — Retrievers documentation](https://docs.llamaindex.ai/en/stable/module_guides/querying/retriever/) — small-to-big and other retrieval patterns.
 
 ---
 

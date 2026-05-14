@@ -258,7 +258,7 @@ The fundamentals layer. Every entry conforms to the schema in [CONTRIBUTING.md](
 
 **References.**
 - [Saito & Rehmsmeier — "The Precision-Recall Plot Is More Informative than the ROC Plot When Evaluating Binary Classifiers on Imbalanced Datasets"](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0118432) — the canonical PR-AUC argument.
-- [Davis & Goadrich — "The Relationship Between Precision-Recall and ROC Curves"](https://www.biostat.wisc.edu/~page/rocpr.pdf) — formal connection.
+- [Davis & Goadrich — "The Relationship Between Precision-Recall and ROC Curves"](https://dl.acm.org/doi/10.1145/1143844.1143874) — formal connection.
 
 ---
 

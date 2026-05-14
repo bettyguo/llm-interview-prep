@@ -1,2 +1,28 @@
 # URLs to skip during linkcheck. One per line; # for comment.
-# Use this for URLs that linkcheck can't validate (paywalls, rate limits, etc).
+# Use this for URLs that linkcheck can't validate (paywalls, rate limits, schema placeholders).
+
+# Schema-example placeholders in CONTRIBUTING.md / README.md / PR template
+https://url
+https://url1
+https://url2
+
+# This repo's own URLs (don't exist until the repo is published)
+https://github.com/bettyguo/llm-interview-prep/actions/workflows/linkcheck.yml/badge.svg
+https://github.com/bettyguo/llm-interview-prep/actions/workflows/ci.yml/badge.svg
+https://github.com/bettyguo/llm-interview-prep
+https://github.com/bettyguo/llm-interview-prep/actions/workflows/ci.yml
+https://github.com/bettyguo/llm-interview-prep/actions/workflows/linkcheck.yml
+https://github.com/bettyguo/llm-interview-prep/commits/main
+https://github.com/bettyguo/llm-interview-prep/stargazers
+https://github.com/bettyguo/build-your-own-ai
+https://github.com/bettyguo/ai-engineer-roadmap
+https://github.com/bettyguo/harness-engineer-roadmap
+https://github.com/bettyguo
+
+# Bot-protected publishers that 403 a HEAD/GET from non-browser clients but resolve in browsers
+https://www.pnas.org/doi/10.1073/pnas.1903070116
+https://www.jstor.org/stable/2346178
+https://dl.acm.org/doi/10.1145/2382577.2382579
+https://dl.acm.org/doi/10.1145/1553374.1553380
+https://dl.acm.org/doi/10.1145/1143844.1143874
+https://www.uber.com/blog/michelangelo-machine-learning-platform/
