@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="llm-interview-prep social card">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F1B2D"/>
+      <stop offset="100%" stop-color="#1A2A44"/>
+    </linearGradient>
+    <style>
+      .title { font-family: 'JetBrains Mono', monospace; font-weight: 700; fill: #F4F4F2; }
+      .sub { font-family: 'Inter', sans-serif; font-weight: 400; fill: #BFC9D6; }
+      .credit { font-family: 'Inter', sans-serif; fill: #8896A6; }
+    </style>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <text x="600" y="280" class="title" font-size="80" text-anchor="middle">llm-interview-prep</text>
+  <text x="600" y="340" class="sub" font-size="26" text-anchor="middle">The canonical AI / LLM / ML interview prep guide.</text>
+  <text x="600" y="380" class="sub" font-size="22" text-anchor="middle">Concepts · Worked answers · System-design drills · Study plan.</text>
+  <text x="600" y="565" class="credit" font-size="18" text-anchor="middle">Curated by Betty Guo · University of Hong Kong · 2026</text>
+</svg>

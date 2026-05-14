@@ -1,0 +1,2 @@
+# URLs to skip during linkcheck. One per line; # for comment.
+# Use this for URLs that linkcheck can't validate (paywalls, rate limits, etc).

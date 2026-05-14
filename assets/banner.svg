@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="llm-interview-prep">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F1B2D"/>
+      <stop offset="100%" stop-color="#1A2A44"/>
+    </linearGradient>
+    <style>
+      .title { font-family: 'JetBrains Mono', 'Fira Mono', 'Menlo', monospace; font-weight: 700; fill: #F4F4F2; }
+      .sub { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-weight: 400; fill: #BFC9D6; }
+      .pill { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-weight: 500; fill: #0F1B2D; }
+      .credit { font-family: 'Inter', sans-serif; font-size: 14px; fill: #8896A6; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="420" fill="url(#bg)"/>
+
+  <text x="60" y="160" class="title" font-size="64">llm-interview-prep</text>
+  <text x="60" y="210" class="sub" font-size="22">Everything you need to walk into an AI engineering interview prepared.</text>
+
+  <!-- topic pills -->
+  <g transform="translate(60,265)">
+    <g>
+      <rect x="0"   y="0" rx="14" ry="14" width="138" height="32" fill="#E0B450"/>
+      <text x="69"  y="22" class="pill" font-size="13" text-anchor="middle">Transformers</text>
+    </g>
+    <g>
+      <rect x="150" y="0" rx="14" ry="14" width="112" height="32" fill="#E0B450"/>
+      <text x="206" y="22" class="pill" font-size="13" text-anchor="middle">Training</text>
+    </g>
+    <g>
+      <rect x="274" y="0" rx="14" ry="14" width="120" height="32" fill="#E0B450"/>
+      <text x="334" y="22" class="pill" font-size="13" text-anchor="middle">Inference</text>
+    </g>
+    <g>
+      <rect x="406" y="0" rx="14" ry="14" width="76"  height="32" fill="#E0B450"/>
+      <text x="444" y="22" class="pill" font-size="13" text-anchor="middle">RAG</text>
+    </g>
+    <g>
+      <rect x="494" y="0" rx="14" ry="14" width="96"  height="32" fill="#E0B450"/>
+      <text x="542" y="22" class="pill" font-size="13" text-anchor="middle">Agents</text>
+    </g>
+    <g>
+      <rect x="602" y="0" rx="14" ry="14" width="160" height="32" fill="#E0B450"/>
+      <text x="682" y="22" class="pill" font-size="13" text-anchor="middle">ML System Design</text>
+    </g>
+    <g>
+      <rect x="774" y="0" rx="14" ry="14" width="120" height="32" fill="#E0B450"/>
+      <text x="834" y="22" class="pill" font-size="13" text-anchor="middle">Behavioral</text>
+    </g>
+  </g>
+
+  <text x="1220" y="395" class="credit" text-anchor="end">Curated by Betty Guo · HKU · 2026</text>
+</svg>
