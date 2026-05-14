@@ -29,3 +29,7 @@ https://www.uber.com/blog/michelangelo-machine-learning-platform/
 https://www.jstor.org/stable/2699986
 https://www.jstor.org/stable/2984875
 https://mitpress.mit.edu/9780262536578/learning-with-kernels/
+https://mitpress.mit.edu/9780262170055/dataset-shift-in-machine-learning/
+https://www.researchgate.net/publication/280581078_Pseudo-Label_The_Simple_and_Efficient_Semi-Supervised_Learning_Method_for_Deep_Neural_Networks
+https://www.researchgate.net/publication/220280066_Bias-Variance_Decompositions_for_Likelihood-Based_Estimators
+https://journals.ametsoc.org/view/journals/mwre/78/1/1520-0493_1950_078_0001_vofeit_2_0_co_2.xml

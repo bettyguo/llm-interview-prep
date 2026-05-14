@@ -73,7 +73,7 @@ Everything is **static** (no backend), **local-only** (progress in `localStorage
 
 <!-- BUILD:STATS:START -->
 
-**Total questions:** 400
+**Total questions:** 501
 
 | # | Topic | Questions |
 |---|-------|-----------|
@@ -82,12 +82,12 @@ Everything is **static** (no backend), **local-only** (progress in `localStorage
 | 3 | 03 — Training & Fine-Tuning | 61 |
 | 4 | 04 — Inference & Serving | 63 |
 | 5 | 05 — Retrieval & RAG | 55 |
-| 6 | 06 — Agents & Harnesses | 20 |
-| 7 | 07 — Evaluation & Calibration | 18 |
+| 6 | 06 — Agents & Harnesses | 49 |
+| 7 | 07 — Evaluation & Calibration | 48 |
 | 8 | 08 — ML System Design | 10 |
-| 9 | 09 — ML / AI Coding Questions | 20 |
-| 10 | 10 — Research Discussion & Paper Deep-Dives | 13 |
-| 11 | 11 — Behavioral & Communication | 15 |
+| 9 | 09 — ML / AI Coding Questions | 42 |
+| 10 | 10 — Research Discussion & Paper Deep-Dives | 23 |
+| 11 | 11 — Behavioral & Communication | 25 |
 | 12 | 12 — Study Plan | 0 |
 
 <!-- BUILD:STATS:END -->

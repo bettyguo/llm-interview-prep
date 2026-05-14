@@ -455,3 +455,258 @@ Common job-talk failure modes:
 A research talk is a hiring signal at researcher / staff levels: communication, taste in what's important, ownership of limitations, clarity under pressure. The structure above is the recipe; rehearsal makes it work.
 
 ---
+
+### Q: How do you find the "right" paper to read on a new topic?
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [paper-discovery, research-process]
+
+**Short answer.** Start with the canonical / most-cited paper (Google Scholar, Semantic Scholar). Read its abstract + figures + related work. Identify the 2–3 sub-fields. For each: find the most-recent strong paper. Iterate. Within a week, you have a clean map. Avoid: reading 20 papers superficially before knowing which matter.
+
+**Expansion / why this is the answer.**
+Effective paper discovery: depth-first on the most-relevant trunk; broad reading comes after you know the structure.
+
+**Common follow-ups.**
+- "What if I can't tell what's canonical?" → Survey papers; ask a domain expert; the most-cited recent paper in a venue is often a good start.
+
+**Common mistakes.**
+- Reading the latest paper on a topic before reading the foundational one — you don't understand the context.
+
+**Signal.**
+Hiring signal at researcher levels: do you have effective research-discovery habits?
+
+---
+
+### Q: How do you keep a research log?
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [research-log, note-taking]
+
+**Short answer.** Per paper: title, one-paragraph summary, why-it-matters, your take. Per experiment: hypothesis, setup, result, conclusion, next-step. Markdown notes in a personal repo / Obsidian / Notion / Logseq. The log compounds: in 6 months you have a personal map of what you know and what's open.
+
+**Expansion / why this is the answer.**
+A research log is the cheapest, highest-ROI research tool. Without it, papers blur; with it, knowledge compounds.
+
+**Common follow-ups.**
+- "What template do you use?" → Whatever you'll actually maintain.
+
+**Common mistakes.**
+- No log; you can't recall what you read 3 months ago.
+
+**Signal.**
+Discipline + research process maturity.
+
+---
+
+### Q: What's a "research taste" question an interviewer might ask?
+
+**Category:** behavioral
+**Difficulty:** senior
+**Tags:** [research-taste, judgment]
+
+**Short answer.** Examples: "Pick a paper you think is over-cited but actually weak." "What's a problem the field is working on that you think is mis-framed?" "What's a paper you read last year that you've changed your mind about?" These probe research judgment — can you have opinions on the field, defend them, and update?
+
+**Expansion / why this is the answer.**
+What lands:
+- A specific opinion, defended with reasons.
+- Updating your view when challenged.
+- Distinguishing "I dislike the paper" from "the paper is wrong."
+
+What doesn't:
+- "All papers in field X are interesting!" — no taste.
+- Disparaging without substance.
+
+**Common follow-ups.**
+- "Can you justify your view?" → Have specific points.
+
+**Common mistakes.**
+- No prepared opinions; freezes in the interview.
+
+**Signal.**
+Senior+ research role probe: do you have independent judgment?
+
+---
+
+### Q: Walk through the Llama 3 paper.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [llama-3, paper-deep-dive]
+
+**Short answer.** **Contribution**: 8B/70B/405B family trained on ~15T tokens; substantial improvements over Llama 2 via data quality + scale + extensive post-training. **Architecture**: standard dense decoder-only with GQA + RoPE + SwiGLU + RMSNorm. **Training**: Chinchilla-scaling-violating (well past compute-optimal); aggressive data filtering; iterative DPO post-training across 5+ rounds. **Eval**: competitive with GPT-4 / Claude 3.x at 405B scale.
+
+**Expansion / why this is the answer.**
+- Architecture: nothing radical; rely on scale and data.
+- Pretraining data: 15.6T tokens; substantial code + multilingual.
+- Vocab: 128k tokens (vs Llama 2's 32k); better multilingual + code.
+- Post-training: SFT → DPO iterations; explicit rejection-sampling-FT before DPO.
+- Long-context: 8k → 32k → 128k via continued pretraining stages.
+
+**Common follow-ups.**
+- "What's notable about Llama 3 vs 2 architectures?" → GQA throughout (was 70B-only in Llama 2); larger vocab; FFN sizing changes.
+- "Why over-train past Chinchilla-optimal?" → Inference economy: smaller model, fully baked.
+
+**Common mistakes.**
+- Citing Llama 3 architecture as innovative; the contribution is scale + data + training.
+
+**References.**
+- [Llama Team — "The Llama 3 Herd of Models"](https://arxiv.org/abs/2407.21783).
+
+---
+
+### Q: Walk through "Direct Preference Optimization" (Rafailov et al.).
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [dpo, paper-deep-dive]
+
+**Short answer.** **Contribution**: derive a closed-form supervised loss equivalent to KL-regularized RLHF; skip the reward model and PPO. **Method**: under Bradley-Terry preference + KL-regularized policy objective, the optimal policy implicitly defines a reward; substitute and the BCE-style loss falls out. **Eval**: matches or beats PPO-RLHF at much lower compute. **Why it matters**: changed the entire post-training landscape — most open-weight models post-2023 use DPO over PPO.
+
+**Expansion / why this is the answer.**
+See T3 "DPO loss math" entry for the derivation. The paper deep-dive structure:
+- **Method**: derive the equivalence; loss is `−log σ(β [log π_θ(y_w|x)/π_ref(y_w|x) − log π_θ(y_l|x)/π_ref(y_l|x)])`.
+- **Theoretical equivalence**: optimal under BT + KL-regularized RL.
+- **Eval**: better than PPO on TL;DR summarization and other tasks; much cheaper to train.
+
+**Common follow-ups.**
+- "Limitations?" → Likelihood-decrease pathology; less responsive than PPO to fine-grained reward shaping.
+
+**Common mistakes.**
+- Calling DPO "RL"; it's supervised.
+
+**References.**
+- [Rafailov et al. — "DPO"](https://arxiv.org/abs/2305.18290).
+
+---
+
+### Q: Walk me through the "Tools and Agents in LLMs" landscape circa 2026.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [agents, landscape, 2026]
+
+**Short answer.** State as of 2026: (a) **frontier models** (Claude 4.x, GPT-5, Gemini 2.x) are highly capable single-agent operators with strong tool use; (b) **agentic benchmarks** (SWE-bench Verified, TAU-bench, GAIA) show progressively-better performance; (c) **production patterns**: ReAct single-agent + tools dominate; multi-agent for specific cases (research swarms); (d) **MCP** is the emerging tool-protocol standard. Compared to 2024: more reliable, longer-horizon, but long-horizon coherence remains a research frontier.
+
+**Expansion / why this is the answer.**
+- 2023: agent demos; brittle.
+- 2024: SWE-bench started moving (5% → 20%+ in a year); first production deployments (Devin, Cursor).
+- 2025: SWE-bench Verified plateaued near 70%+; computer-use agents launched.
+- 2026: long-horizon agents reaching minutes-to-hours of useful work; reliability still gap to humans on complex tasks.
+
+**Common follow-ups.**
+- "What's the next frontier?" → Long-horizon coherence; multimodal world-modeling; agent-agent collaboration.
+
+**Common mistakes.**
+- Treating agents as solved or treating them as completely broken; reality is in between.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+- [Jimenez et al. — "SWE-bench"](https://arxiv.org/abs/2310.06770).
+
+---
+
+### Q: What's a recent paper / approach you'd want to learn more about?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [research-curiosity]
+
+**Short answer.** Pick a specific paper or approach — `DeepSeek-V3`'s MTP, `Mamba-2`, `Mixture-of-Depths`, `EAGLE-3`, GRPO+verifier-RL pipelines, sparse autoencoders for interpretability. State why you find it interesting (a specific question or claim). Avoid generic "AGI / superintelligence" framings — too broad.
+
+**Expansion / why this is the answer.**
+Signal: do you have an active reading life? Can you explain why you're curious?
+
+What works:
+- "I want to understand why MoE fine-grained experts (DeepSeek-V3) beat coarse (Mixtral) at the same active-params."
+- "I want to follow up on the lost-in-the-middle problem at 1M context."
+
+What doesn't:
+- "I want to understand AGI." — too vague.
+
+**Common follow-ups.**
+- "Why specifically?" → Have a real reason.
+
+**Common mistakes.**
+- Saying "I want to read more papers in general."
+
+**Signal.**
+Specific curiosity = research maturity.
+
+---
+
+### Q: How do you balance reading papers with building?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [reading-vs-building, balance]
+
+**Short answer.** Both are essential and reinforce each other: papers without building → shallow understanding; building without reading → reinventing wheels. Concrete balance: 60–70% building, 20–30% reading + writing, occasional deep dives. The exact ratio shifts by phase: early-career → more reading; senior IC → more building; research role → more both.
+
+**Expansion / why this is the answer.**
+Reading-only failure mode: armchair expert who can't ship.
+Building-only failure mode: re-invents-the-wheel and stays at one level.
+
+**Common follow-ups.**
+- "How do you decide what to read?" → Driven by current building; read what unblocks the next step.
+
+**Common mistakes.**
+- Treating reading as a separate "research time" from building work.
+
+**Signal.**
+Pragmatic balance; not pedantically academic.
+
+---
+
+### Q: Walk through "Constitutional AI" by Anthropic.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [constitutional-ai, anthropic, paper-deep-dive]
+
+**Short answer.** **Contribution**: replace human preference labeling with AI self-critique against a written constitution. **Method**: SFT on self-critique-then-revise outputs; RLAIF with AI-generated preference labels based on constitution adherence. **Eval**: better helpful-harmless tradeoff; lower over-refusal rate. **Why it matters**: scaled alignment beyond human-labeling bandwidth; established RLAIF as a viable approach.
+
+**Expansion / why this is the answer.**
+- The pipeline:
+  - Stage 1: SFT on self-revised outputs (model critiques + revises against constitution).
+  - Stage 2: model judges which of two outputs better follows constitution; produces preference dataset.
+  - Stage 3: RL (PPO) on the AI-labeled preferences.
+- Constitution: principles + few-shot examples for self-critique.
+- Modern Claude uses CAI-style training.
+
+**Common follow-ups.**
+- "Risks?" → AI-labeler biases propagate; need diverse labelers.
+
+**Common mistakes.**
+- Treating CAI as a single technique vs. a multi-stage pipeline.
+
+**References.**
+- [Bai et al. — "Constitutional AI"](https://arxiv.org/abs/2212.08073).
+
+---
+
+### Q: Walk through "Chain-of-Thought Prompting" (Wei et al. 2022).
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [cot, paper-deep-dive]
+
+**Short answer.** **Contribution**: showed that prompting LLMs with intermediate reasoning examples dramatically improves multi-step task performance. **Method**: few-shot examples include `(question, reasoning chain, answer)` triples; LLM imitates the pattern. **Eval**: order-of-magnitude gains on GSM8K, math benchmarks. **Why it matters**: established a new prompting paradigm; precursor to modern reasoning models (o1, R1).
+
+**Expansion / why this is the answer.**
+- Earlier prompting: question → answer.
+- CoT: question → step-by-step reasoning → answer.
+- Emergent behavior: only large models benefit; small models can even regress.
+- Subsequent: zero-shot CoT (Kojima et al.), self-consistency (Wang et al.), o1-style learned reasoning.
+
+**Common follow-ups.**
+- "Does CoT actually represent the model's reasoning?" → Not necessarily faithful (Turpin et al. 2023).
+
+**Common mistakes.**
+- Treating CoT as universally beneficial; small models regress.
+
+**References.**
+- [Wei et al. — "Chain-of-Thought Prompting"](https://arxiv.org/abs/2201.11903).
+
+---

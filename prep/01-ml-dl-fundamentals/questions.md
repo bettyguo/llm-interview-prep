@@ -1462,7 +1462,7 @@ The fundamentals layer. Every entry conforms to the schema in [CONTRIBUTING.md](
 
 **References.**
 - [Brown et al. — GPT-3](https://arxiv.org/abs/2005.14165) — LLM few-shot framework.
-- [Lampert et al. — "Learning to Detect Unseen Object Classes by Between-Class Attribute Transfer"](https://www.di.ens.fr/~lampert/papers/2009-cvpr-lampert.pdf) — classical.
+- [Lampert et al. — "Learning to Detect Unseen Object Classes by Between-Class Attribute Transfer"](https://ieeexplore.ieee.org/document/5206594) — classical.
 
 ---
 

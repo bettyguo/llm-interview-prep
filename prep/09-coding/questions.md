@@ -1305,6 +1305,9 @@ def generate(model, input_ids: torch.Tensor, max_new_tokens: int = 50, temperatu
 
 **Short answer.** Split text on sentence boundaries (e.g. `. `, `! `, `? `); pack sentences into chunks until target token budget reached; overlap by including the last K tokens of the previous chunk in the next.
 
+**Expansion / why this is the answer.**
+Sentence-aware chunking preserves coherence in each chunk; the overlap ensures sentences at boundaries appear in both adjacent chunks so they're recoverable in retrieval. Use a real sentence splitter (nltk, spacy) for non-trivial text; regex misses edge cases (abbreviations, decimals).
+
 **Common follow-ups.**
 - "Sentence boundary detection?" → Use nltk / spacy for robust detection; regex is brittle.
 
@@ -1354,6 +1357,9 @@ if __name__ == "__main__":
 
 **Short answer.** Already covered above in `rrf.py` snippet; this entry generalizes for arbitrary number of rankings with weighted variant.
 
+**Expansion / why this is the answer.**
+Standard RRF treats all rankings equally; weighted RRF lets you trust one source more than another. Useful when one retriever is empirically stronger on your workload.
+
 **Common follow-ups.**
 - "Weighted RRF?" → Each ranking has a weight; sum `w_i / (k + rank)`.
 
@@ -1389,6 +1395,9 @@ if __name__ == "__main__":
 **Tags:** [bradley-terry, elo, pairwise]
 
 **Short answer.** Given pairs `(winner, loser)`, maximum-likelihood fit Bradley-Terry ratings: `P(i beats j) = σ(r_i − r_j)`. Use gradient descent or scipy's optimizer.
+
+**Expansion / why this is the answer.**
+Bradley-Terry is the standard probabilistic model behind pairwise rankings (used by Chatbot Arena, MT-Bench). The closed-form solution doesn't exist in general; numerical optimization (LBFGS) of the negative log-likelihood finds the ratings.
 
 **Common follow-ups.**
 - "How does this relate to Elo?" → Logistic Elo is mathematically Bradley-Terry.
@@ -1439,6 +1448,9 @@ if __name__ == "__main__":
 
 **Short answer.** Cohen's κ = `(p_o − p_e) / (1 − p_e)` where `p_o` is observed agreement and `p_e` is chance agreement. > 0.6 typically considered substantial.
 
+**Expansion / why this is the answer.**
+Raw agreement `p_o` overstates because raters agree by chance. κ subtracts chance agreement and normalizes by remaining agreement room. Use for inter-rater agreement on categorical labels.
+
 **Common follow-ups.**
 - "Cohen's vs Fleiss' kappa?" → Cohen's: two raters. Fleiss': N raters.
 
@@ -1479,6 +1491,9 @@ if __name__ == "__main__":
 
 **Short answer.** DCG = Σ `relevance_i / log2(rank_i + 1)`; nDCG = DCG / ideal-DCG. Captures position-weighted relevance — higher-ranked hits worth more.
 
+**Expansion / why this is the answer.**
+The log2 discount models user attention decay with rank. nDCG normalizes by the best-possible ranking ("ideal DCG"), giving a [0, 1] score. Standard IR metric.
+
 **Common follow-ups.**
 - "Why log2 discount?" → Empirically chosen; smooth decay reflecting user attention drop with rank.
 
@@ -1514,6 +1529,9 @@ if __name__ == "__main__":
 **Tags:** [kv-cache, pytorch, decode]
 
 **Short answer.** Maintain per-layer K/V tensors; append at each decode step; use the full cache for attention against new query.
+
+**Expansion / why this is the answer.**
+KV cache turns O(n²) per-token decode into O(n) per-token by reusing prior K, V computations. Standard pattern in HuggingFace `past_key_values`.
 
 **Common follow-ups.**
 - "Memory?" → Grows with sequence length; cap or prune for long contexts.
@@ -1575,6 +1593,9 @@ if __name__ == "__main__":
 
 **Short answer.** Loop: send context to LLM; parse output for Thought / Action / final answer; execute action via tool; append observation; continue.
 
+**Expansion / why this is the answer.**
+The ReAct pattern. Production agents use structured tool-use APIs instead of free-text parsing — the parsing here is for clarity.
+
 **Common follow-ups.**
 - "How to detect termination?" → Look for a `Final Answer:` line.
 
@@ -1618,6 +1639,9 @@ def react_loop(llm: Callable[[str], str], tools: dict[str, Callable], initial_pr
 
 **Short answer.** Use `torch.nn.utils.clip_grad_norm_(params, max_norm)` after backward but before optimizer step. Standard `max_norm = 1.0` for LLM training.
 
+**Expansion / why this is the answer.**
+Gradient clipping by global norm prevents the occasional spike from destabilizing training. Norm-clipping is preferred over value-clipping because it preserves the gradient direction.
+
 **Common follow-ups.**
 - "Norm vs value clipping?" → Norm is dominant; preserves gradient direction.
 
@@ -1645,6 +1669,9 @@ def train_step_with_clip(model: torch.nn.Module, loss: torch.Tensor, optimizer: 
 **Tags:** [self-consistency, cot, voting]
 
 **Short answer.** Sample N chain-of-thought traces; extract the answer from each; majority-vote. Robust to noisy single traces.
+
+**Expansion / why this is the answer.**
+Single CoT traces are noisy; majority-vote across N samples denoises. Especially powerful for math/reasoning where the correct answer is more likely to dominate.
 
 **Common follow-ups.**
 - "What N?" → 5–40 typical; diminishing returns past 20.
@@ -1681,6 +1708,9 @@ def self_consistency_solve(llm: Callable[[str], str], prompt: str, n_samples: in
 **Tags:** [temperature-scaling, calibration]
 
 **Short answer.** After training, learn a single scalar T to apply to logits, minimizing NLL on a held-out validation set. Preserves accuracy; improves calibration (ECE).
+
+**Expansion / why this is the answer.**
+Post-hoc calibration via temperature scaling (Guo et al. 2017) is one parameter, easy to fit, and works well empirically. LBFGS converges quickly because the problem is convex in T.
 
 **Common follow-ups.**
 - "Doesn't change accuracy?" → Argmax unchanged; only confidence calibration.
@@ -1727,6 +1757,12 @@ if __name__ == "__main__":
 
 **Short answer.** Divide each embedding by its L2 norm; the cosine similarity then equals dot product. One-liner with NumPy or PyTorch broadcasting.
 
+**Expansion / why this is the answer.**
+Normalizing once at index time means retrieval is a pure dot product — fast on modern hardware. Almost every dense retrieval stack does this.
+
+**Common follow-ups.**
+- "Always normalize?" → For cosine retrieval, yes. For raw embedding inspection, no.
+
 **Common mistakes.**
 - Dividing by zero on degenerate inputs (zero embedding); add epsilon.
 
@@ -1755,6 +1791,12 @@ if __name__ == "__main__":
 **Tags:** [mha, multi-head, attention]
 
 **Short answer.** Project Q, K, V to `(B, T, H * D)`; reshape to `(B, H, T, D)`; compute per-head attention; concatenate; project to output dim.
+
+**Expansion / why this is the answer.**
+Each head attends independently; concatenation + output projection mixes the heads. Use `F.scaled_dot_product_attention` for FlashAttention-fused execution where available.
+
+**Common follow-ups.**
+- "Why concatenate then project, not just sum?" → Output projection is a learnable mixing of heads — strictly more expressive than sum.
 
 **Common mistakes.**
 - Forgetting the output projection.
@@ -1796,6 +1838,16 @@ class MHA(nn.Module):
 
 **Short answer.** Use `torch.autocast(bf16)` for forward; divide loss by `accum_steps`; backward each micro-batch; clip and step every `accum_steps`. With bf16, no GradScaler needed; with fp16, use `torch.cuda.amp.GradScaler`.
 
+**Expansion / why this is the answer.**
+Combines memory-saving mixed precision with effective-batch scaling via accumulation. Standard pattern for LLM fine-tuning on limited GPUs.
+
+**Common follow-ups.**
+- "Why bf16 instead of fp16?" → Wider range; no loss scaling needed.
+
+**Common mistakes.**
+- Stepping every micro-batch instead of every `accum_steps`.
+- Forgetting to clip after accumulation.
+
 **Implementation.**
 ```python
 import torch
@@ -1833,6 +1885,15 @@ def compute_loss(model, batch):
 
 **Short answer.** Perplexity = `exp(mean(-log p_i))` = `exp(cross_entropy)`. One-liner over a sequence of log-probs.
 
+**Expansion / why this is the answer.**
+Average NLL → exponentiate → geometric mean of `1/p(token)`. Lower is better. Compare across same tokenizer; otherwise normalize.
+
+**Common follow-ups.**
+- "Why mean and not sum?" → Mean is per-token; comparable across sequence lengths.
+
+**Common mistakes.**
+- Mixing up natural-log and log-2 (perplexity bases).
+
 **Implementation.**
 ```python
 import numpy as np
@@ -1858,6 +1919,15 @@ if __name__ == "__main__":
 
 **Short answer.** `|A ∩ B| / |A ∪ B|`. Useful for measuring consistency across different retrieval runs.
 
+**Expansion / why this is the answer.**
+Standard set-similarity metric; bounded [0, 1]; symmetric. Common in retrieval-eval to check stability across runs or methods.
+
+**Common follow-ups.**
+- "Difference from Jaccard?" → Same thing; IoU = Jaccard.
+
+**Common mistakes.**
+- Returning NaN on both-empty inputs; handle by convention (1.0 here).
+
 **Implementation.**
 ```python
 def iou(a: set, b: set) -> float:
@@ -1881,6 +1951,15 @@ if __name__ == "__main__":
 **Tags:** [ece, calibration, eval]
 
 **Short answer.** Bin predictions by confidence; per bin, compute (accuracy, confidence) and weighted gap; sum weighted gaps.
+
+**Expansion / why this is the answer.**
+ECE estimates how far the model's stated confidence is from its accuracy. 0 = perfectly calibrated; higher = over- or under-confident.
+
+**Common follow-ups.**
+- "Bin choice?" → 10–20 equal-width bins typical; adaptive bins for skewed distributions.
+
+**Common mistakes.**
+- Not handling empty bins; division by zero.
 
 **Implementation.**
 ```python
@@ -1926,6 +2005,15 @@ if __name__ == "__main__":
 
 **Short answer.** Keep the latest N tokens verbatim; replace the older portion with a summary from a cheap LLM. Trigger when context exceeds a threshold.
 
+**Expansion / why this is the answer.**
+Production agent loops use this to stay within context limits. Summary quality matters; cheap LLM is fine if the summary preserves task-critical facts.
+
+**Common follow-ups.**
+- "What to preserve verbatim?" → System prompt, original goal, last N turns.
+
+**Common mistakes.**
+- Summarizing too aggressively; losing the task thread.
+
 **Implementation.**
 ```python
 from typing import Callable
@@ -1954,6 +2042,15 @@ def compact_context(messages: list[dict], llm_summarize: Callable[[str], str], k
 
 **Short answer.** Join the tokens; strip the end-of-word marker; return.
 
+**Expansion / why this is the answer.**
+BPE decode is the inverse of encode: concatenate the tokens (they're substrings of words) and replace special markers with their original characters (e.g. `</w>` → space).
+
+**Common follow-ups.**
+- "Byte-level BPE decoding?" → Decode the bytes to UTF-8.
+
+**Common mistakes.**
+- Not handling the end-of-word marker; produces concatenated words.
+
 **Implementation.**
 ```python
 def decode_bpe(tokens: list[str], eos_marker: str = "</w>") -> str:
@@ -1977,6 +2074,15 @@ if __name__ == "__main__":
 **Tags:** [broadcasting, numpy]
 
 **Short answer.** Right-align the shapes; for each aligned dim, ensure both are equal or one is 1. Trivial helper but useful in debugging.
+
+**Expansion / why this is the answer.**
+NumPy / PyTorch broadcasting rule: pad shorter shape with 1s on the left; then per-dim require equal or one-is-1. Useful debugging utility.
+
+**Common follow-ups.**
+- "Why right-align?" → Convention: trailing dimensions match (think of the batch as the leftmost).
+
+**Common mistakes.**
+- Confusing left-align with right-align.
 
 **Implementation.**
 ```python

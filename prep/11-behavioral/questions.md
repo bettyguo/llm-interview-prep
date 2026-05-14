@@ -481,3 +481,278 @@ What's worth mentioning:
 This is a workflow question more than a deep behavioral. It signals: do you have the rhythm of an experienced ML engineer? Are you running experiments scientifically or by vibes?
 
 ---
+
+### Q: Tell me about a project where the scope ballooned. How did you handle it?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [scope-creep, project-management]
+
+**Short answer.** Pick a real story: project scope expanded during execution; you (a) recognized the expansion early; (b) escalated with explicit tradeoffs ("we can do X by Y, or X+Z by Y+Δ"); (c) negotiated a clear new scope or a phased delivery. The interviewer wants to see proactive scope management, not heroic "kept working overtime."
+
+**Expansion / why this is the answer.**
+- Story shape:
+  - Initial scope.
+  - Scope expansion (why it happened — new info, stakeholder ask).
+  - Your response: re-estimate; explicit tradeoff to stakeholder; agreed plan.
+  - Outcome: phased delivery / scope cut / agreed extension.
+- What lands poorly: "I worked harder and finished both." → no scope management.
+
+**Common follow-ups.**
+- "What did you cut?" → Specific.
+- "How would you have caught it earlier?" → Earlier check-ins.
+
+**Common mistakes.**
+- Saying "scope never balloons on my projects." → reads as no real responsibility.
+
+**Signal.**
+Project management; communication; tradeoff judgment.
+
+---
+
+### Q: How do you handle technical debt vs. shipping features?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [tech-debt, prioritization]
+
+**Short answer.** Real tradeoff. Strategy: classify tech debt by *interest rate* (how much it slows future work) and *principal* (cost to fix). Pay down high-interest debt continuously (small refactors during feature work); schedule larger paydowns explicitly. Avoid both extremes: rewrite-everything (over-correction) and never-refactor (compounding slowdown).
+
+**Expansion / why this is the answer.**
+- The metaphor (Ward Cunningham): tech debt has interest; some debt is OK (high-velocity prototyping) if you pay it.
+- **High-interest debt**: every feature in the area is slowed → pay continuously.
+- **Low-interest debt**: rare path; defer.
+- **Communication**: stakeholders rarely understand tech debt; translate into business terms ("this slows future feature delivery by ~30%").
+
+**Common follow-ups.**
+- "How do you make the case for tech-debt work?" → Quantify slowdown; tie to business metrics.
+
+**Common mistakes.**
+- "I always prioritize features" → unsustainable.
+- "I always refactor" → never ships.
+
+**Signal.**
+Engineering judgment + stakeholder communication.
+
+---
+
+### Q: What's the most important lesson you've learned in your career so far?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [self-reflection, learning]
+
+**Short answer.** Pick a specific lesson tied to a real story. Avoid platitudes ("always communicate"); pick something concrete: "I learned to invest in evaluation before scaling a model" or "I learned that the right scope is usually half what you originally planned." Show how it has shaped subsequent work.
+
+**Expansion / why this is the answer.**
+What lands:
+- Specific lesson + specific story + how you apply it now.
+
+What doesn't:
+- Generic ("teamwork is important").
+- Too negative (only learning from one disaster).
+
+**Common follow-ups.**
+- "How did you apply it later?" → Have a follow-up story.
+
+**Common mistakes.**
+- Platitudes; freshness from real experience matters.
+
+**Signal.**
+Self-awareness; growth.
+
+---
+
+### Q: Describe your strengths and weaknesses honestly.
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [self-assessment]
+
+**Short answer.** Strengths: pick 2–3 specific ones tied to evidence ("I'm strong at scoping; on project X I caught the over-scope at week 1 and re-scoped before we wasted Q1"). Weaknesses: real ones with active mitigation ("I tend toward over-engineering; I now require myself to write the minimal MVP before optimizing"). Avoid humblebrags ("my weakness is I work too hard").
+
+**Expansion / why this is the answer.**
+What lands:
+- Strengths: specific, evidence-backed.
+- Weaknesses: real + actively managed.
+
+What doesn't:
+- Generic strengths.
+- Fake weaknesses.
+- Untreated weaknesses (no growth signal).
+
+**Common follow-ups.**
+- "How are you working on the weakness?" → Specific.
+
+**Common mistakes.**
+- Humblebrag weaknesses.
+
+**Signal.**
+Self-awareness; growth mindset.
+
+---
+
+### Q: Why are you leaving your current role?
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [transition, motivation]
+
+**Short answer.** Be honest but professional. Frame in terms of growth, not grievance: "I'm looking for an environment with stronger AI-systems focus" beats "my current team isn't technical enough." Even genuine grievances should be reframed as growth opportunities. If you were laid off / fired, address directly and briefly without dwelling.
+
+**Expansion / why this is the answer.**
+What lands:
+- Forward-looking ("I want to work on X which this role offers").
+- Honest but not bitter.
+- Specific.
+
+What doesn't:
+- Bad-mouthing current employer.
+- Vague "looking for new challenges."
+
+**Common follow-ups.**
+- "What would your current manager say about you?" → Honest assessment; avoid surprises.
+
+**Common mistakes.**
+- Trashing current employer.
+- Defensiveness about layoffs.
+
+**Signal.**
+Maturity; emotional intelligence.
+
+---
+
+### Q: How do you handle deadlines that slip?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [deadlines, communication]
+
+**Short answer.** Re-estimate as soon as you detect risk; communicate early ("here's where I am; here's what's at risk; here are options: A delivers what we agreed late, B delivers a subset on time"). Never silently miss a deadline. Have a specific story of a deadline you proactively re-scoped.
+
+**Expansion / why this is the answer.**
+What lands:
+- Early communication.
+- Concrete options.
+- Owned outcome.
+
+What doesn't:
+- Hide the slip.
+- Single-option flag ("we'll just be late").
+
+**Common follow-ups.**
+- "How early do you flag?" → As soon as you have signal; over-flag is better than late-flag.
+
+**Common mistakes.**
+- Silent slips.
+
+**Signal.**
+Communication; project management.
+
+---
+
+### Q: Tell me about a time you had to learn a new technical area quickly.
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [learning, fast-ramp]
+
+**Short answer.** Pick a real story: new area (LLMs, recsys, a programming language); aggressive ramp; concrete approach (foundational paper / book + build a thing). Show that you have a systematic learning process, not "I'm a fast learner" platitude. Quantify if possible ("contributed to the codebase within 2 weeks").
+
+**Expansion / why this is the answer.**
+What works:
+- Specific learning steps.
+- Outcome.
+- Why this is repeatable.
+
+**Common follow-ups.**
+- "What was hardest?" → Specific.
+
+**Common mistakes.**
+- "I just picked it up" → no process.
+
+**Signal.**
+Learning agility.
+
+---
+
+### Q: How do you give feedback to a peer who's struggling?
+
+**Category:** behavioral
+**Difficulty:** mid
+**Tags:** [feedback, mentoring, collaboration]
+
+**Short answer.** Direct, kind, specific, private. Don't soften so much it's unclear; don't surprise with major issues. Use "I observed X; the impact was Y; here's what I suggest" framing. Real story: peer struggling on Z; you noticed; private 1:1; specific feedback + suggested help. Outcome: improvement or escalation, not avoidance.
+
+**Expansion / why this is the answer.**
+Pattern:
+- **Private**: never in public.
+- **Specific**: "you missed the deadline" not "you're disorganized."
+- **Impact**: state what went wrong because of it.
+- **Suggestion**: actionable.
+
+**Common follow-ups.**
+- "What if they react badly?" → Listen; address misunderstandings; if persistent issue, involve manager.
+
+**Common mistakes.**
+- Vague feedback.
+- Surprising them with major issues.
+
+**Signal.**
+Maturity; collaboration skill.
+
+---
+
+### Q: Describe a time you said "I don't know."
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [intellectual-honesty]
+
+**Short answer.** Pick a story where you publicly acknowledged ignorance and either learned + returned with an answer, or escalated to someone who knew. Intellectual honesty is critical for AI roles — the field changes too fast to pretend. Avoid stories where you faked knowledge.
+
+**Expansion / why this is the answer.**
+What lands:
+- A specific moment of "I don't know."
+- The follow-up: research, learn, return.
+
+What doesn't:
+- "I always know."
+- "Fake it till you make it" stories.
+
+**Common follow-ups.**
+- "How do you decide between learning and escalating?" → Time-criticality.
+
+**Common mistakes.**
+- Reluctant to admit ignorance.
+
+**Signal.**
+Intellectual honesty; senior judgment.
+
+---
+
+### Q: How do you make decisions under uncertainty?
+
+**Category:** behavioral
+**Difficulty:** senior
+**Tags:** [decision-making, uncertainty]
+
+**Short answer.** Frame the decision: what's at stake; what info would change my mind; what's reversible vs not. For reversible decisions: bias toward action, learn from outcome. For irreversible: invest more in information; consult; defer if possible. Bezos's "one-way door vs two-way door" framing is the classic.
+
+**Expansion / why this is the answer.**
+Decision-making patterns:
+- **Two-way door (reversible)**: decide fast; iterate.
+- **One-way door (irreversible)**: more information; broader consult; explicit risk analysis.
+- **Bayesian update**: what evidence would change my decision? Seek that evidence.
+- **Pre-mortem**: imagine failure; identify the most-likely cause; mitigate.
+
+**Common follow-ups.**
+- "How do you avoid analysis paralysis?" → Reversible decisions don't deserve deep analysis.
+
+**Common mistakes.**
+- One-size-fits-all approach.
+
+**Signal.**
+Decision discipline; senior judgment.
+
+---

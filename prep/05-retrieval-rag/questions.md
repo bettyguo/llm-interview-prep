@@ -1689,7 +1689,7 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - ACL only at the UI layer; the index must enforce it.
 
 **References.**
-- [Anthropic — Enterprise SOC 2 docs](https://www.anthropic.com/trust).
+- [Anthropic — Trust Center](https://trust.anthropic.com/).
 - [Qdrant docs — security](https://qdrant.tech/documentation/guides/security/).
 
 ---
