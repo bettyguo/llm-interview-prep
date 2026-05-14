@@ -776,3 +776,851 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Deng et al. — "CUPED"](https://exp-platform.com/Documents/2013-02-CUPED-ImprovingSensitivityOfControlledExperiments.pdf).
 
 ---
+
+### Q: What's the Brier score, and when do you use it?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [brier, calibration, scoring-rule]
+
+**Short answer.** Brier score = `(p − y)²` averaged over examples; for binary classification with `p` = predicted probability, `y ∈ {0, 1}`. A proper scoring rule: minimized when `p` equals the true probability. Captures both accuracy and calibration in one number. Lower is better.
+
+**Expansion / why this is the answer.**
+- Decomposes (Murphy 1973) into: reliability (calibration) + resolution + uncertainty (irreducible).
+- Use when you need one number that captures probability-quality, not just ranking.
+- Range: 0 (perfect) to ~0.25 (random binary).
+
+**Common follow-ups.**
+- "Brier vs log-loss?" → Both proper scoring; Brier bounded; log-loss penalizes confidently-wrong harder.
+
+**Common mistakes.**
+- Treating Brier as just "accuracy"; it includes calibration.
+
+**References.**
+- [Brier — "Verification of Forecasts Expressed in Terms of Probability"](https://journals.ametsoc.org/view/journals/mwre/78/1/1520-0493_1950_078_0001_vofeit_2_0_co_2.xml).
+
+---
+
+### Q: What is "score normalization" in evaluation?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [normalization, evaluation, fairness]
+
+**Short answer.** When aggregating scores across heterogeneous tasks (math + code + reasoning), per-task scales differ; some tasks have wider score ranges. Normalization: z-score, min-max, or rank-percentile, applied per task before aggregation. Without normalization, the "easiest" tasks dominate. HELM (Liang et al. 2022) uses this kind of normalization.
+
+**Expansion / why this is the answer.**
+- **The problem**: averaging raw scores treats "1 point on MATH" as equal to "1 point on MMLU"; not meaningful.
+- **Normalization options**:
+  - **Z-score**: standardize per task.
+  - **Min-max**: scale to [0, 1] using known range.
+  - **Rank-percentile**: percentile rank within the task's leaderboard.
+- **Aggregate**: average the normalized scores.
+
+**Common follow-ups.**
+- "Why doesn't Open LLM Leaderboard just average raw?" → It does both — raw and normalized.
+
+**Common mistakes.**
+- Unweighted-average across tasks of very different scales.
+
+**References.**
+- [Liang et al. — HELM](https://arxiv.org/abs/2211.09110).
+
+---
+
+### Q: What is "trick questions" / adversarial eval?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [adversarial, robustness, eval]
+
+**Short answer.** Adversarial eval: prompts crafted to expose model weaknesses — leading questions, false premises, ambiguous instructions, jailbreaks. TruthfulQA, GSM-Plus, BIG-Bench-Hard contain these. Goal: measure robustness beyond standard accuracy. Production models should pass clean benchmarks *and* hold up under adversarial probing.
+
+**Expansion / why this is the answer.**
+- **Categories**:
+  - Misleading premises: "Why is the sun cold?"
+  - Adversarial paraphrases of known questions.
+  - Jailbreak prompts (safety-related).
+- **Benchmarks**: TruthfulQA, GSM-Plus (Li et al. 2024), MMLU-Pro.
+- **Why important**: real users include adversarial inputs; robustness matters.
+
+**Common follow-ups.**
+- "Does training on adversarial sets help?" → Yes; but new attacks evolve.
+
+**Common mistakes.**
+- Clean benchmarks only; adversarial robustness ignored.
+
+**References.**
+- [Lin et al. — "TruthfulQA"](https://arxiv.org/abs/2109.07958).
+- [Li et al. — "GSM-Plus"](https://arxiv.org/abs/2402.19255).
+
+---
+
+### Q: What is "RewardBench" / reward-model evaluation?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [reward-bench, reward-model, eval]
+
+**Short answer.** RewardBench (Lambert et al. 2024): benchmark for evaluating reward models used in RLHF / DPO. Tests whether the RM correctly ranks pairs across diverse domains (chat, safety, reasoning, code). Important because the RM is the silent partner in alignment — a bad RM means a bad post-training run.
+
+**Expansion / why this is the answer.**
+- The setup: many `(prompt, chosen, rejected)` pairs across domains; measure RM accuracy at ranking.
+- Categories include chat, safety, reasoning, code.
+- A good RM ranks correctly >85% across all categories.
+- Used to compare RMs before deploying in RLHF pipelines.
+
+**Common follow-ups.**
+- "How do you train a good RM?" → Diverse preference data; careful annotation; quality control.
+
+**Common mistakes.**
+- Deploying RM in RLHF without eval; surprise reward hacking later.
+
+**References.**
+- [Lambert et al. — "RewardBench"](https://arxiv.org/abs/2403.13787).
+
+---
+
+### Q: What is "perplexity," and is it a good LLM eval?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [perplexity, evaluation, intrinsic]
+
+**Short answer.** Perplexity = `exp(cross-entropy loss)`; geometric mean of `1/p(token)`. Measures how "surprised" the model is by held-out text. Useful for *intrinsic* evaluation of LM quality during training. *Not* a good measure of instruction-following, helpfulness, or task quality — those need extrinsic evaluation.
+
+**Expansion / why this is the answer.**
+- Perplexity strengths:
+  - Cheap.
+  - Direct measure of likelihood under the model.
+  - Comparable across training checkpoints.
+- Perplexity weaknesses:
+  - Tokenizer-dependent (can't compare across different tokenizers without normalization).
+  - Doesn't measure task quality post-SFT (the SFT objective is different).
+  - Lower perplexity ≠ better at downstream tasks always.
+- Used: during pretraining for sanity check; rarely the headline post-SFT metric.
+
+**Common follow-ups.**
+- "How to compare across tokenizers?" → Normalize by bytes-per-character or characters-per-token.
+- "Why doesn't post-SFT perplexity correlate with capability?" → SFT changes the distribution; perplexity on pretraining-style data drops.
+
+**Common mistakes.**
+- Comparing perplexity across different tokenizers directly.
+
+**References.**
+- [Jurafsky & Martin — *Speech and Language Processing*, §3](https://web.stanford.edu/~jurafsky/slp3/).
+
+---
+
+### Q: What's "human-annotated eval" gotchas?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [human-eval, annotation, inter-rater]
+
+**Short answer.** Common gotchas: (1) **annotator drift** over weeks; (2) **low inter-rater agreement** on subjective tasks (~70% κ is common); (3) **fatigue effects**; (4) **annotator population matters** (crowd-workers vs. domain experts); (5) **specification ambiguity** — vague instructions yield inconsistent labels. Mitigate with calibration tasks, multiple annotators per item, periodic re-training.
+
+**Expansion / why this is the answer.**
+- **Drift**: same task, same annotator, week 3 disagrees with week 1.
+- **Inter-rater agreement**: κ < 0.6 → instructions ambiguous; κ 0.6–0.8 → moderate; > 0.8 → good.
+- **Quality controls**:
+  - Calibration set: questions with known answers; check annotator accuracy.
+  - Multiple annotators per item.
+  - Trap questions.
+- **Specification**: write annotation guidelines as if for a colleague; iterate when ambiguous cases arise.
+
+**Common follow-ups.**
+- "Who annotates production safety data?" → Specialized vendors (Surge, Scale AI); in-house teams for high-stakes.
+- "Why is annotation expensive?" → Quality is bottleneck; speed-quality tradeoff.
+
+**Common mistakes.**
+- Single annotator; no calibration; no agreement tracking.
+
+**References.**
+- [Artstein & Poesio — "Inter-Coder Agreement for Computational Linguistics"](https://aclanthology.org/J08-4004/).
+
+---
+
+### Q: How does LLM-as-judge calibrate against humans?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [llm-judge, calibration, agreement]
+
+**Short answer.** Build a gold human-graded set (100–500 items); run the LLM judge on it; compute agreement (Cohen's κ or accuracy). Iterate the judge prompt — clearer rubric, more examples, randomized order, ensemble of judges — until agreement is acceptable (typically >85% for well-defined tasks). Re-validate periodically.
+
+**Expansion / why this is the answer.**
+- See T7 base entry; this is a quick-recall version.
+
+**Common follow-ups.**
+- "Minimum useful agreement?" → Depends on task; >80% common; >90% strong.
+
+**Common mistakes.**
+- Trusting LLM judge without ever calibrating.
+
+**References.**
+- [Zheng et al. — MT-Bench](https://arxiv.org/abs/2306.05685).
+
+---
+
+### Q: What is "needle in a haystack" testing?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [needle-in-haystack, long-context]
+
+**Short answer.** Insert a small "needle" (one fact) into a long context filled with irrelevant "haystack" text; ask the model about the needle; measure accuracy as a function of needle position. Stresses long-context models. Kamradt's open repo is the canonical implementation. Modern long-context LLMs largely pass needle-tests; real long-context tasks remain harder.
+
+**Expansion / why this is the answer.**
+- The test:
+  - Generate a long passage (10k–1M tokens) of unrelated text.
+  - Insert one specific sentence at a controlled position.
+  - Ask the model about the needle.
+  - Measure accuracy as a function of position.
+- **What it reveals**:
+  - Lost-in-the-middle: U-shaped accuracy curve.
+  - Hard limits: accuracy drops sharply past some context length.
+- **Limitations**:
+  - Synthetic; doesn't measure real comprehension.
+  - Models can be trained to pass needle tests without genuinely using long context.
+
+**Common follow-ups.**
+- "Why is needle test passing not sufficient?" → Real long-context tasks (multi-hop, summarization) need more than retrieval.
+- "Modern model performance?" → Claude 3+, Gemini 1.5+, GPT-4-turbo+ pass needle-tests at 200k–1M; real-world long-context still has issues.
+
+**Common mistakes.**
+- Reporting needle-test pass-rate as proof of long-context mastery.
+
+**References.**
+- [Kamradt — Needle in a Haystack benchmark](https://github.com/gkamradt/LLMTest_NeedleInAHaystack).
+
+---
+
+### Q: What is RULER as a long-context benchmark?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [ruler, long-context-bench]
+
+**Short answer.** RULER (Hsieh et al. 2024): a comprehensive long-context benchmark beyond needle-in-haystack. Tests multi-key retrieval, multi-hop tracking, aggregation, question answering at various context lengths. More representative of real long-context use than simple needle tests.
+
+**Expansion / why this is the answer.**
+- Categories:
+  - Single-key retrieval.
+  - Multi-key (find K specific needles).
+  - Multi-value (aggregate multiple keys).
+  - Multi-hop tracing.
+  - Aggregation (count, sum).
+  - QA.
+- Tests at 4k, 8k, 16k, 32k, 64k, 128k contexts.
+- Reveals: many models pass needle tests but fail on multi-hop or aggregation at long context.
+
+**Common follow-ups.**
+- "Recent SOTA on RULER?" → Gemini 1.5 Pro, Claude 3.x, GPT-4-turbo strong at 32k–128k; degrades past 200k.
+
+**Common mistakes.**
+- Single benchmark for long context; RULER is more thorough.
+
+**References.**
+- [Hsieh et al. — "RULER"](https://arxiv.org/abs/2404.06654).
+
+---
+
+### Q: What is "task contamination" specifically?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [contamination, task-leak, eval]
+
+**Short answer.** Task contamination: the model has seen the *task setup* (not just the answer) during pretraining. E.g., the GSM8K format ("Q: ... A: 18") appears in pretraining data. Different from answer-contamination; harder to detect; affects how well the model performs on the benchmark structure. Modern decontamination targets both.
+
+**Expansion / why this is the answer.**
+- **Answer contamination**: exact question + answer in pretraining.
+- **Task contamination**: similar problem structure / wording in pretraining; model "knows the format."
+- **Hard to detect**: paraphrased / similar tasks pervade the web.
+- **Mitigation**:
+  - Post-cutoff benchmarks (GPQA, MMLU-Pro after model cutoffs).
+  - Hand-curated novel problems.
+  - Adversarial paraphrases (GSM-Plus).
+
+**Common follow-ups.**
+- "How do you measure task contamination?" → Hard; sometimes infer from performance on novel-format equivalents.
+
+**Common mistakes.**
+- Treating decontamination as just removing exact strings.
+
+**References.**
+- [Magar & Schwartz — "Data Contamination"](https://arxiv.org/abs/2203.08242).
+
+---
+
+### Q: What is "G-Eval" / structured LLM-judge?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [g-eval, structured-judge, rubric]
+
+**Short answer.** G-Eval (Liu et al. 2023): use an LLM as judge with a structured chain-of-thought rubric — instead of "rate from 1–5," give the judge a step-by-step rubric to follow, then derive the final score. Better calibration than naive prompting. Standard pattern in production LLM-judge.
+
+**Expansion / why this is the answer.**
+- **Naive LLM-judge**: "Rate this answer from 1 to 5."
+- **G-Eval**: "Step 1: Check criterion A. Step 2: Check criterion B. ... Step N: Aggregate." Output structured.
+- **Why better**: forces the judge to reason explicitly; less subject to surface features.
+- **Combined with**: position randomization, multiple judges, calibration.
+
+**Common follow-ups.**
+- "Does G-Eval cost more?" → Yes; longer judge outputs. Worth it for accuracy gains.
+
+**Common mistakes.**
+- One-shot "rate this" without rubric.
+
+**References.**
+- [Liu et al. — "G-Eval"](https://arxiv.org/abs/2303.16634).
+
+---
+
+### Q: What is "MT-Bench"?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [mt-bench, multi-turn]
+
+**Short answer.** MT-Bench (Zheng et al. 2023): a multi-turn benchmark for chat LLMs. 80 prompts covering writing, math, reasoning, coding, etc. — each in two turns (initial + follow-up). LLM-as-judge (GPT-4 typically) scores responses on a 10-point scale. Widely used; complements Chatbot Arena for assessing chat-LLM quality.
+
+**Expansion / why this is the answer.**
+- 80 carefully-crafted prompts across 8 categories.
+- 2 turns each.
+- GPT-4 as judge; outputs 1–10 score.
+- Calibrated against human ratings.
+- Used in many LLM release blog posts.
+
+**Common follow-ups.**
+- "How does MT-Bench compare to Arena?" → Arena: crowdsourced pairwise. MT-Bench: fixed prompts + LLM-judge. Both informative; Arena harder to game.
+
+**Common mistakes.**
+- Treating MT-Bench as a comprehensive benchmark; 80 prompts is small.
+
+**References.**
+- [Zheng et al. — "MT-Bench" and Chatbot Arena](https://arxiv.org/abs/2306.05685).
+
+---
+
+### Q: What is "Arena Hard" / "Arena Hard-Auto"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [arena-hard, judge-bench]
+
+**Short answer.** Arena Hard (Li et al. 2024): a curated, hard subset of Chatbot Arena prompts; LLM-judge evaluation with strong correlation to Arena Elo. Arena Hard-Auto: automated, reproducible, much cheaper than running real Arena. Faster signal for model iteration than waiting for Arena Elo.
+
+**Expansion / why this is the answer.**
+- 500 hard prompts from Arena traffic.
+- Pairwise: compare candidate vs. baseline.
+- LLM-judge (GPT-4 / Claude).
+- Output: win rate against baseline.
+- Correlates with real Arena ranking ~0.9+.
+
+**Common follow-ups.**
+- "Hard vs Arena Elo?" → Hard-Auto is faster and reproducible; Elo is the gold standard but slow.
+
+**Common mistakes.**
+- Treating Hard as equivalent to Elo; they correlate but aren't identical.
+
+**References.**
+- [Li et al. — "Arena Hard"](https://lmsys.org/blog/2024-04-19-arena-hard/).
+
+---
+
+### Q: What is BIG-Bench Hard (BBH)?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [bbh, big-bench, reasoning]
+
+**Short answer.** BBH (Suzgun et al. 2022): 23 hardest tasks from BIG-Bench, where previous LLMs underperformed humans. Tests reasoning, logic, multi-step problem solving. Modern frontier models score 90%+; useful for evaluating reasoning capability of weaker / smaller models.
+
+**Expansion / why this is the answer.**
+- BIG-Bench: 200+ task collection (community-contributed).
+- BBH: the hardest 23, where LLMs were worst.
+- Tasks: logical deduction, navigate (track state), reasoning about words.
+- Used as: a reasoning benchmark; less prominent at frontier scale (saturated).
+
+**Common follow-ups.**
+- "Replaced by what?" → GPQA, MATH, ARC-AGI for harder reasoning.
+
+**Common mistakes.**
+- Citing BBH as evidence of capability at frontier scale; it's saturated.
+
+**References.**
+- [Suzgun et al. — "BIG-Bench Hard"](https://arxiv.org/abs/2210.09261).
+
+---
+
+### Q: What is "LiveCodeBench"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [livecodebench, coding-eval]
+
+**Short answer.** LiveCodeBench (Jain et al. 2024): a constantly-updated coding benchmark with problems collected from LeetCode/CodeForces/AtCoder by date. Time-filtered (problems after a model's training cutoff are uncontaminated). Solves the contamination problem of older coding benchmarks (HumanEval, MBPP). Standard for modern coding-LLM eval.
+
+**Expansion / why this is the answer.**
+- The contamination problem: HumanEval, MBPP have been in pretraining data for years.
+- LiveCodeBench: dated problems; filter by date.
+- Categories: code generation, code completion, test output prediction.
+- Updated regularly.
+
+**Common follow-ups.**
+- "Why not just use SWE-bench?" → Different scope: SWE-bench is real-world repo issues; LiveCodeBench is competitive programming.
+
+**Common mistakes.**
+- Citing HumanEval scores from 2024+ models — contaminated.
+
+**References.**
+- [Jain et al. — "LiveCodeBench"](https://arxiv.org/abs/2403.07974).
+
+---
+
+### Q: What's "instruction-following" benchmarks (IFEval)?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [ifeval, instruction-following]
+
+**Short answer.** IFEval (Zhou et al. 2023): instruction-following benchmark with *verifiable* instructions ("respond in exactly 4 paragraphs"; "include the word 'apple' twice"). Programmatic checking of compliance. Tests whether the model can follow specific format / structural instructions, not just general intent.
+
+**Expansion / why this is the answer.**
+- 500+ prompts each with verifiable instructions.
+- Verification: programmatic checks (no LLM-judge).
+- Measures: prompt-level accuracy + instruction-level accuracy.
+- Modern models: ~85–95% on instruction-level; harder on prompt-level.
+
+**Common follow-ups.**
+- "Why does this matter?" → Production apps depend on the model following specific format rules.
+
+**Common mistakes.**
+- Optimizing capability while ignoring instruction-following; downstream apps suffer.
+
+**References.**
+- [Zhou et al. — "IFEval"](https://arxiv.org/abs/2311.07911).
+
+---
+
+### Q: What is "ChatArena Hard / IFBench Hard"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [hard-benchmarks, evaluation]
+
+**Short answer.** Hard variants of standard benchmarks (e.g. Arena Hard from Arena, IFBench Hard from IFEval): curated subsets where current frontier models still differ meaningfully. Useful when standard benchmarks have saturated; provide a fresh signal for model iteration.
+
+**Expansion / why this is the answer.**
+- The pattern: as benchmarks saturate, curated hard subsets refresh the signal.
+- Examples:
+  - Arena Hard from Arena.
+  - MMLU-Pro from MMLU.
+  - GSM-Hard from GSM8K.
+
+**Common follow-ups.**
+- "When does a benchmark saturate?" → When top models score >95%; further changes are statistical noise.
+
+**Common mistakes.**
+- Citing saturated benchmark numbers as a meaningful comparison.
+
+**References.**
+- [Li et al. — "Arena Hard"](https://lmsys.org/blog/2024-04-19-arena-hard/).
+
+---
+
+### Q: How do you eval a multimodal LLM specifically?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [multimodal-eval, mmmu, mathvista]
+
+**Short answer.** Multimodal benchmarks: **MMMU** (Massive Multi-discipline Multimodal Understanding), **MathVista** (math+visual), **DocVQA** (document understanding), **ChartQA** (charts), **MMStar**, **MMBench**. Each tests different aspects: knowledge, reasoning over images, document understanding, chart parsing. No single number captures multimodal capability; report across these.
+
+**Expansion / why this is the answer.**
+- **MMMU**: college-level questions requiring image + text understanding across many disciplines.
+- **MathVista**: math problems with visual context.
+- **DocVQA**: questions about documents (PDFs).
+- **ChartQA**: questions about charts.
+- **MMStar / MMBench**: comprehensive multimodal capability.
+
+**Common follow-ups.**
+- "Why so many benchmarks?" → Multimodal is a broader capability surface than text-only.
+
+**Common mistakes.**
+- One multimodal score; misses task-specific weaknesses.
+
+**References.**
+- [Yue et al. — "MMMU"](https://arxiv.org/abs/2311.16502).
+- [Lu et al. — "MathVista"](https://arxiv.org/abs/2310.02255).
+
+---
+
+### Q: What is "ARC-AGI" specifically, and why is it hard?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [arc-agi, abstract-reasoning]
+
+**Short answer.** ARC-AGI (Chollet 2019; ARC-AGI-2 2024): visual-grid abstract reasoning puzzles. Each task: 2–4 example transformations; the model must infer the rule and apply to a test grid. Designed to measure *fluid intelligence* — novel reasoning, not memorization. Resistant to scale; humans score ~85%, frontier LLMs ~30–60%. Active research target for AGI-like reasoning.
+
+**Expansion / why this is the answer.**
+- The format: input-output grid pairs; infer the transformation; apply to a new input.
+- **Why hard for LLMs**:
+  - Grid manipulation is unfamiliar.
+  - Each task is novel — no memorization.
+  - Requires abstract pattern recognition.
+- **Scoring**:
+  - Pure pass/fail per task.
+  - $1M prize challenge (2024); top models still well below human.
+- **Recent progress**:
+  - o3-style reasoning models improved sharply (~80%+ in late 2024 with high test-time compute).
+
+**Common follow-ups.**
+- "Does ARC-AGI's resistance to scale invalidate scaling?" → Argument: scaling helps language tasks; abstract reasoning may need different ingredients.
+- "What's ARC-AGI-2?" → Updated harder set.
+
+**Common mistakes.**
+- Treating ARC-AGI scores as a single number; high variance per attempt.
+
+**References.**
+- [Chollet — "On the Measure of Intelligence" (ARC)](https://arxiv.org/abs/1911.01547).
+- [ARC Prize 2024](https://arcprize.org/).
+
+---
+
+### Q: What is "test-set leakage" via the test labels?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [leakage, test-labels]
+
+**Short answer.** Sometimes the test labels themselves (not just questions) leak into training corpus or RLHF preference data — labelers see the test set, label it, and that labeled data feeds back into training. Distinct from question-only contamination; rarer but more pernicious. Mitigation: keep test sets private; pseudonymize labelers.
+
+**Expansion / why this is the answer.**
+- The mechanism:
+  - Test set published.
+  - Labelers (RLHF, eval) see the test items.
+  - Their judgments influence model training.
+  - Effectively: test labels in training.
+- **More subtle than question leakage**: the questions might not be in pretraining, but the *correct answers* shape the model.
+- Mitigations:
+  - Keep test sets out of labeler workflows.
+  - Use held-out private sets for the headline metric.
+  - Periodic audit of labeler-test overlap.
+
+**Common follow-ups.**
+- "How do you detect this?" → Difficult; primarily prevention by separation.
+
+**Common mistakes.**
+- Letting RLHF labelers see public benchmarks.
+
+**References.**
+- [Magar & Schwartz — "Data Contamination"](https://arxiv.org/abs/2203.08242).
+
+---
+
+### Q: What is "user satisfaction" / CSAT as an LLM eval metric?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [csat, user-eval, online]
+
+**Short answer.** CSAT (Customer Satisfaction): thumbs up/down or 1–5 rating from users on their LLM interaction. Direct measure of user-facing quality. Useful for production tracking; noisy at item level but stable in aggregate. Pair with offline benchmarks for a full picture.
+
+**Expansion / why this is the answer.**
+- Collection:
+  - Inline UI: 👍 / 👎 after each response.
+  - Post-session survey.
+- Properties:
+  - Direct user signal.
+  - Sparse (most users don't rate).
+  - Noisy: opinion varies; mood; quality of the question.
+  - Aggregates well at scale.
+- Use:
+  - Daily / weekly monitoring.
+  - A/B test signal.
+  - Failure-mode discovery (rated-down responses go to review queue).
+
+**Common follow-ups.**
+- "Why is CSAT noisy?" → Subjective; selection bias (extreme reactions rate more).
+
+**Common mistakes.**
+- Using CSAT as the only metric; correlates only loosely with capability.
+
+**References.**
+- [Kohavi et al. — *Trustworthy A/B*](https://experimentguide.com/).
+
+---
+
+### Q: How do you measure "harm rate" of an LLM in production?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [harm-rate, safety, monitoring]
+
+**Short answer.** Hard. Combine: (a) **safety-eval suite** scored offline; (b) **production sampling**: send % of traffic to a safety-classifier or human reviewer; (c) **user reports** of unsafe outputs; (d) **adversarial red-team** continually probing. Aggregate as a "harm-per-1000-requests" metric. Frontier labs report such numbers in system cards.
+
+**Expansion / why this is the answer.**
+- **Multiple sources** because no single one is comprehensive:
+  - Eval suite: known cases.
+  - Production sampling: real-world.
+  - User reports: tail events.
+  - Red-team: novel attacks.
+- **Categories** typically separated:
+  - Bio/chem (rare, high-stakes).
+  - CSAM (zero-tolerance).
+  - Misinformation.
+  - Privacy leakage.
+  - Hate speech.
+- **Targets**:
+  - High-stakes categories: <1 per 10k requests.
+  - Lower-stakes: <0.1% rate.
+
+**Common follow-ups.**
+- "How do you report this externally?" → System cards published by OpenAI, Anthropic, Google.
+
+**Common mistakes.**
+- One static eval; production drifts.
+
+**References.**
+- [Anthropic — Claude system cards](https://www.anthropic.com/news).
+- [OpenAI — GPT-4 system card](https://cdn.openai.com/papers/gpt-4-system-card.pdf).
+
+---
+
+### Q: How do you evaluate hallucination at production scale?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [hallucination, production-eval]
+
+**Short answer.** Continuous monitoring: (a) sample 1% of production traffic; (b) LLM-judge or NLI-classifier scores each response for factuality / faithfulness; (c) flag suspected hallucinations; (d) human-review a subset of flags weekly; (e) trend metrics over time. Provides a real-world hallucination rate; alerts on regressions.
+
+**Expansion / why this is the answer.**
+- Without continuous monitoring: hallucination only visible on offline eval; production drift unseen.
+- Pipeline:
+  - Sample → classifier → flag.
+  - Aggregate: hallucination rate per category, per model version.
+  - Alert on regressions.
+- Cost: 1% sampling + classifier inference = 1–2% extra LLM inference cost. Worth it.
+
+**Common follow-ups.**
+- "What's a sustainable rate?" → Domain-dependent; some apps tolerate 5%, others <0.1%.
+
+**Common mistakes.**
+- Offline eval only; production blindspot.
+
+**References.**
+- [Min et al. — "FActScore"](https://arxiv.org/abs/2305.14251).
+
+---
+
+### Q: What is "evaluator bias" beyond LLM-judge biases?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [evaluator-bias, human-bias, llm-judge]
+
+**Short answer.** All evaluators have biases — humans and LLMs both. Human raters: cultural background, language, time-of-day fatigue. LLM judges: position, length, style, self-preference. Best practice: diverse evaluator population for humans; ensemble multiple LLM judges; calibration against ground truth. Document evaluator biases when reporting results.
+
+**Expansion / why this is the answer.**
+- Human evaluator biases:
+  - Cultural / linguistic.
+  - Familiarity bias (recognize the model's style).
+  - Halo effect.
+- LLM judge biases:
+  - Position, length, style.
+  - Self-preference (a model favors its own outputs).
+  - Capability ceiling (judge can't evaluate above its capability).
+- Mitigations:
+  - Diverse human evaluator pool.
+  - Ensemble LLM judges.
+  - Hidden randomization.
+
+**Common follow-ups.**
+- "When is human bias worse than LLM judge?" → Subjective domain-specific tasks where annotator pool isn't representative.
+
+**Common mistakes.**
+- Treating one rater pool as definitive.
+
+**References.**
+- [Zheng et al. — MT-Bench](https://arxiv.org/abs/2306.05685).
+
+---
+
+### Q: How do you evaluate an LLM's "reasoning depth"?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [reasoning, depth, evaluation]
+
+**Short answer.** Use reasoning-heavy benchmarks: **GPQA** (graduate science), **MATH** (competition math), **ARC-AGI** (abstract reasoning), **AIME** (competition math), **HumanEval+** (code reasoning). Combine with **chain-of-thought consistency** metrics (self-consistency vote pass rate). Reasoning is hard to capture in one number; report a portfolio.
+
+**Expansion / why this is the answer.**
+- **Math-leaning**: MATH, AIME, OlympiadBench.
+- **Knowledge + reasoning**: GPQA (Google-proof grad-level science).
+- **Abstract**: ARC-AGI.
+- **Code reasoning**: HumanEval+, LiveCodeBench.
+- **Process metrics**:
+  - Self-consistency: sample N traces; majority vote. Pass rate correlates with reasoning quality.
+  - Process-reward-model score (per-step grading).
+
+**Common follow-ups.**
+- "Why portfolio?" → Different benchmarks stress different skills; one is over-saturated.
+
+**Common mistakes.**
+- Single benchmark for reasoning; misses dimensions.
+
+**References.**
+- [Rein et al. — "GPQA"](https://arxiv.org/abs/2311.12022).
+- [Hendrycks et al. — "MATH"](https://arxiv.org/abs/2103.03874).
+
+---
+
+### Q: What is "GRPO eval" / RL training-stage evaluation?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [grpo-eval, rl-monitoring]
+
+**Short answer.** During GRPO / RL training, track: (a) **reward curve** (does the verifier-reward rise?); (b) **policy KL** from reference (drifting too far?); (c) **completion length** (often grows; verify it's not unbounded); (d) **gold-task accuracy** on a held-out eval to detect reward-hacking. Without holdout, you only see proxy-reward improvement; the gold-vs-proxy gap is the warning sign.
+
+**Expansion / why this is the answer.**
+- Reward curve rises → proxy improving.
+- KL: drifting too far → policy collapses or hacks reward.
+- Completion length: many RL setups produce ever-longer responses; cap or penalize.
+- Gold-task accuracy: the real signal.
+- The "reward overoptimization curve" (Gao et al. 2022): proxy rises, gold plateaus then drops.
+
+**Common follow-ups.**
+- "What's the diagnostic for reward hacking?" → Proxy keeps rising; gold stops or drops.
+
+**Common mistakes.**
+- Only tracking proxy reward.
+
+**References.**
+- [Gao, Schulman, Hilton — "Reward Overoptimization"](https://arxiv.org/abs/2210.10760).
+
+---
+
+### Q: What is "behavior change detection" across model versions?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [version-tracking, regression]
+
+**Short answer.** When deploying a new model version, run a **regression eval** on a fixed prompt set comparing old vs. new. Catch unintended behavior changes: tone shifts, refusal-rate changes, output-format changes. Critical for production apps that have integrated against a specific model's behavior. Tools: LangSmith, custom diff frameworks.
+
+**Expansion / why this is the answer.**
+- Behavior changes are common between model versions; capability tests miss them.
+- Examples:
+  - New version refuses more politely (different tone).
+  - New version's JSON format slightly different.
+  - New version's chain-of-thought changes.
+- Tools:
+  - Fixed prompt set; run both versions; diff outputs.
+  - LLM-judge: "are these meaningfully different?"
+  - Statistical tests on length / refusal-rate.
+
+**Common follow-ups.**
+- "What's a typical behavior-change rate between major releases?" → 5–15% of fixed prompts produce meaningfully different outputs.
+
+**Common mistakes.**
+- Treating version updates as drop-in; production breaks.
+
+**References.**
+- [LangSmith evaluation docs](https://docs.smith.langchain.com/evaluation).
+
+---
+
+### Q: How do you eval an LLM's "follow-up question handling"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [multi-turn-eval, follow-up]
+
+**Short answer.** Multi-turn evals: (a) **MT-Bench** style two-turn prompts; (b) **conversational eval sets** with chained queries that reference prior context; (c) human evaluation of multi-turn chat sessions. Specifically test: pronoun resolution, context carryover, topic shifts, follow-up question understanding.
+
+**Expansion / why this is the answer.**
+- **Single-turn eval misses**: pronoun resolution ("its"), topic continuity, context-aware reasoning.
+- **Multi-turn benchmarks**:
+  - MT-Bench (8 categories × 2 turns).
+  - TAU-bench (task-oriented multi-turn).
+  - Custom: production-derived chat sessions.
+- **Failure modes to test**:
+  - Loses thread mid-conversation.
+  - Forgets prior context.
+  - Misunderstands pronouns.
+
+**Common follow-ups.**
+- "Why is MT-Bench's 2 turns enough?" → Most conversational failures emerge within 2–3 turns; 8+ is rare.
+
+**Common mistakes.**
+- Single-turn eval only; misses chat-app failures.
+
+**References.**
+- [Zheng et al. — "MT-Bench"](https://arxiv.org/abs/2306.05685).
+
+---
+
+### Q: What's the relationship between BLEU, ROUGE, and modern eval?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [bleu, rouge, ngram-eval]
+
+**Short answer.** **BLEU** (machine translation): n-gram precision against reference translations. **ROUGE** (summarization): n-gram recall against references. Both correlate poorly with human judgment for modern open-ended generation. Mostly displaced by LLM-judge, BERTScore, and embedding-similarity metrics. Still used for translation/summarization with strict reference-availability.
+
+**Expansion / why this is the answer.**
+- **BLEU** (Papineni et al. 2002): precision of n-grams (typically 1-4) + brevity penalty.
+- **ROUGE** (Lin 2004): recall of n-grams.
+- Limitations:
+  - Requires reference text (hard for generative tasks).
+  - N-gram match misses semantic similarity.
+  - Poor correlation with human judgment on modern outputs.
+- Modern replacements:
+  - **BERTScore**: embedding similarity per token.
+  - **LLM-judge**: holistic quality scoring.
+  - **COMET** (for translation): trained metric correlated with human ratings.
+
+**Common follow-ups.**
+- "When is BLEU still used?" → Translation benchmarks (WMT) for historical comparison.
+
+**Common mistakes.**
+- Using BLEU / ROUGE for modern open-ended generation; uncorrelated with quality.
+
+**References.**
+- [Papineni et al. — "BLEU"](https://aclanthology.org/P02-1040/).
+- [Lin — "ROUGE"](https://aclanthology.org/W04-1013/).
+
+---
+
+### Q: What is "preference-based" vs "score-based" evaluation?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [preference, score-based, comparison]
+
+**Short answer.** **Preference-based**: rank/compare outputs (pairwise or k-way). **Score-based**: assign each output an absolute score (1–5, pass/fail). Preference is more reliable (humans / LLMs compare better than rate); score is faster to collect at scale. Production typically uses both: preference for model comparison, score for production monitoring.
+
+**Expansion / why this is the answer.**
+- Preference: Chatbot Arena, MT-Bench pairwise, RLHF data.
+- Score: CSAT, IFEval pass rate, production thumb ratings.
+- Choice depends on goal:
+  - "Is model A better than B?" → preference.
+  - "What % of outputs meet bar?" → score.
+
+**Common follow-ups.**
+- "Why is preference more reliable?" → Comparing two is cognitively easier than rating one in isolation.
+
+**Common mistakes.**
+- Score-only; rater drift dominates.
+
+**References.**
+- [Zheng et al. — "MT-Bench"](https://arxiv.org/abs/2306.05685).
+
+---
