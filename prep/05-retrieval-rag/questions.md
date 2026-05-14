@@ -600,3 +600,270 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Gao et al. — "RARR: Researching and Revising What Language Models Say, Using Language Models"](https://arxiv.org/abs/2210.08726) — verification.
 
 ---
+
+### Q: What is agentic RAG, and when do you reach for it instead of vanilla RAG?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [agentic-rag, multi-hop, react]
+
+**Short answer.** Agentic RAG embeds retrieval inside an agent loop: the model issues a search, reads the results, decides whether to search again (with a refined query), and iterates until it has enough context. Useful for multi-hop questions ("Who founded the company that acquired X in 2019?"), under-specified queries, and exploratory research. Costs more (multiple LLM + retrieval rounds) and is harder to debug; vanilla RAG remains the default for single-hop factual lookup.
+
+**Expansion / why this is the answer.**
+- **Vanilla RAG**: one retrieval pass, one generation. Fixed pipeline.
+- **Agentic RAG**: a loop —
+  1. Model emits a search query (or decides not to search).
+  2. Retriever returns passages.
+  3. Model decides: "do I have what I need?" If yes, answer. If no, refine query and repeat.
+- **Variants**:
+  - **Self-RAG** (Asai et al. 2023): trained to emit special tokens controlling retrieval, supportiveness, and utility — fine-grained inline decisions.
+  - **Corrective RAG / CRAG** (Yan et al. 2024): use a retriever-quality classifier; if retrieved docs are bad, fall back to web search or generation-from-scratch.
+  - **ReAct-RAG**: ReAct loop with `search(query)` as a tool.
+  - **Deep research-style** (OpenAI Deep Research, Anthropic Research, Perplexity Pro): heavy agentic; minutes of compute per query.
+- **When to use agentic RAG**:
+  - **Multi-hop**: chained sub-questions.
+  - **Exploratory**: open-ended research where the user hasn't pinpointed a single fact.
+  - **Long-tail / niche**: first retrieval often misses; need refinement.
+- **When vanilla RAG wins**:
+  - Single-hop factual queries.
+  - Latency-sensitive.
+  - Cost-sensitive (agentic round-trips multiply LLM calls).
+- **Failure modes**:
+  - Agent loops without making progress (no termination).
+  - Compounding errors across hops.
+  - Doubled hallucination risk (each hop is a chance to invent).
+
+**Common follow-ups.**
+- "How do you cap cost in agentic RAG?" → Hard step limit; budget on tool calls; fallback to vanilla on long runs.
+- "What's the right base model?" → Strong tool-use + retrieval-aware behavior. Anthropic / OpenAI frontier; some OSS (Llama 3.1+ instruct) are competent.
+
+**Common mistakes.**
+- Treating agentic RAG as universally better — it's expensive and often unnecessary.
+- No termination criterion → runaway loops.
+
+**References.**
+- [Asai et al. — "Self-RAG"](https://arxiv.org/abs/2310.11511) — Self-RAG.
+- [Yan et al. — "Corrective Retrieval Augmented Generation"](https://arxiv.org/abs/2401.15884) — CRAG.
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents) — agent + retrieval pattern.
+
+---
+
+### Q: How would you build a multi-lingual retrieval system?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [multilingual, cross-lingual, retrieval, bge-m3]
+
+**Short answer.** Use a multilingual embedding model (BGE-M3, Cohere multilingual-embed-v3, OpenAI text-embedding-3) that maps text from many languages into a shared embedding space — same-meaning queries in different languages retrieve the same documents. Pair with language-aware BM25 (per-language analyzers, tokenizers). For low-resource languages, consider machine-translating the query into a high-resource language before retrieval. Evaluate per-language; aggregate retrieval quality varies dramatically across languages.
+
+**Expansion / why this is the answer.**
+- **Multilingual embedding models** (top picks 2024–2026):
+  - **BGE-M3** (Chen et al. 2024): handles 100+ languages; dense + sparse + multi-vector retrieval in one model.
+  - **Cohere embed-v3 multilingual**: production-grade.
+  - **OpenAI text-embedding-3**: multilingual, robust.
+  - **mE5** (Wang et al. 2024): multilingual variant of E5.
+- **Cross-lingual retrieval**: query in language A, retrieve docs in language B; multilingual embeddings make this work natively.
+- **Sparse complement**:
+  - Per-language BM25 with language-specific tokenizers / stemmers / stopwords.
+  - For CJK / Thai / Burmese, character-or-syllable-level tokenization beats whitespace.
+- **Hybrid + RRF**: especially valuable for multilingual where dense retrieval can struggle with named entities in low-resource languages.
+- **Query expansion** for low-resource:
+  - Machine-translate query into the doc's language (or vice versa).
+  - Use multilingual LLM to paraphrase.
+- **Evaluation gotcha**: per-language recall@k can vary by 30+ percentage points. Aggregate scores hide low-resource failures. Eval per-language.
+- **Modern reranker**: Cohere Rerank-3 supports 100+ languages; BGE reranker M3 too.
+
+**Common follow-ups.**
+- "What's BGE-M3's three-mode retrieval?" → Dense, sparse, and multi-vector (ColBERT-style) in one model; combine via score fusion.
+- "Does this work for code search?" → Use a code-specialized model (Voyage code-2, CodeRankEmbed); multilingual code embedding is a niche.
+
+**Common mistakes.**
+- Using an English-only embedding model and assuming it "works for everything."
+- No per-language evaluation.
+
+**References.**
+- [Chen et al. — "BGE-M3"](https://arxiv.org/abs/2402.03216).
+- [Wang et al. — "mE5"](https://arxiv.org/abs/2402.05672).
+
+---
+
+### Q: How would you design a code search system?
+
+**Category:** system-design
+**Difficulty:** senior
+**Tags:** [code-search, retrieval, embeddings]
+
+**Short answer.** Code search needs three complementary indexes: **(1) semantic** (code-trained embedding model retrieves "find me a function that does X"), **(2) lexical / symbol** (exact-name lookup for `getUserById`, AST-grep, tree-sitter), and **(3) graph** (call graph, import graph for "show me callers of `foo`"). Fuse with RRF or learned ranker. Code-specialized embeddings (Voyage code-2, CodeRankEmbed) substantially outperform general-text models on code corpora.
+
+**Expansion / why this is the answer.**
+- **Why code is different from text**:
+  - Identifiers carry strong signal; exact-name lookup is high-precision.
+  - Code structure (AST, type system) is rich; ignoring it loses signal.
+  - Comments + code together: dual representations help.
+- **Components**:
+  1. **Semantic embedding index**:
+     - Code-trained model (Voyage code-2, Cohere embed-v3-code, CodeRankEmbed, OpenAI text-embedding-3).
+     - Chunk by function / class boundary, not arbitrary character windows.
+     - Index per language; query routed by detected language.
+  2. **Lexical / symbol index**:
+     - Tree-sitter parse → AST.
+     - Symbol-graph index (functions, classes, types).
+     - `grep`/regex over identifiers.
+     - LSP-style "find references."
+  3. **Graph index**:
+     - Call graph, import graph, type-hierarchy graph.
+     - Enables "show me the chain of callers."
+- **Fusion**:
+  - Per-query, run all three.
+  - Rerank with a cross-encoder or LLM judge.
+- **Production systems**: Sourcegraph (Cody), GitHub Copilot Workspace, Cursor — each combines variants.
+- **Eval**:
+  - Per-query type (function-by-description, find-callers, search-by-symbol).
+  - CodeSearchNet (Husain et al. 2019) for benchmarks; modern systems use private eval sets too.
+
+**Common follow-ups.**
+- "How would you handle very large monorepos?" → Sharded indexes; lazy embedding on file change; incremental index updates.
+- "How does this integrate with a coding assistant?" → The coding assistant queries this system; results inform completions or chat answers.
+
+**Common mistakes.**
+- Pure-semantic retrieval without symbol lookup — fails on exact-name queries.
+- Treating code chunks as arbitrary text chunks (misses structural boundaries).
+
+**References.**
+- [Husain et al. — "CodeSearchNet"](https://arxiv.org/abs/1909.09436).
+- [Sourcegraph Cody docs](https://sourcegraph.com/docs/cody) — production case study.
+- [Voyage AI — embedding model list](https://docs.voyageai.com/docs/embeddings) — code-2 embeddings.
+
+---
+
+### Q: Compare embedding-as-a-service providers (OpenAI / Cohere / Voyage / open-source).
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [embeddings, providers, mteb]
+
+**Short answer.** **OpenAI text-embedding-3** (large/small): strong general purpose, broad-language; ubiquitous. **Cohere embed-v3**: instruction-aware, strong multilingual, dedicated reranker. **Voyage AI**: domain-specialized (voyage-code-2 for code, voyage-finance-2 for finance). **OSS** (BGE family, E5-Mistral, GTE, Stella): top of MTEB; free; require self-hosting. Pick on (a) MTEB / domain benchmark performance, (b) cost per million tokens, (c) self-host vs. managed, (d) embedding dimension (memory cost downstream).
+
+**Expansion / why this is the answer.**
+- **Closed APIs**:
+  - **OpenAI**: text-embedding-3-large (3072 dim) / -small (1536 dim); great general purpose. Pay-per-token. Multilingual.
+  - **Cohere**: embed-v3 (English / multilingual / light); instruction-aware (separate `input_type` for query vs. document). Dedicated Cohere Rerank-3.
+  - **Voyage**: domain-specialized; voyage-large-2-instruct, voyage-code-2, voyage-finance-2; competitive on niche.
+  - **Google**: text-embedding-gecko on Vertex.
+- **Open source**:
+  - **BGE family** (BAAI): bge-large-en-v1.5, bge-m3 (multilingual + multi-mode).
+  - **E5 / E5-Mistral** (Microsoft): instruction-tuned; strong on MTEB.
+  - **GTE** (Alibaba): gte-large; competitive.
+  - **Stella** (Dunzhang): top of MTEB leaderboard in mid-2024.
+  - **Nomic** (nomic-embed-text): long-context (8192).
+- **Comparison axes**:
+  - **MTEB score**: per-task; pick by your downstream task type (retrieval, classification, clustering).
+  - **Embedding dim**: 384–4096; smaller = cheaper storage / faster ANN. OpenAI text-embedding-3 supports "shortening" — truncate to desired dim with minimal quality loss (Matryoshka representation).
+  - **Cost**: closed APIs ~$0.02–0.13 per million tokens. OSS = your serving cost.
+  - **Self-host**: OSS gives full control + no per-call cost; cost amortizes over scale.
+- **Decision rubric**:
+  - Bootstrapping fast: OpenAI or Cohere.
+  - Domain-specific (code, finance, biomedical): Voyage or domain-fine-tuned OSS.
+  - Sustained high-volume: self-host OSS with FP8/INT8 quantization.
+
+**Common follow-ups.**
+- "What's Matryoshka representation learning?" → Train embeddings such that the first `k` dimensions of a `d`-dim embedding are themselves usable embeddings (with quality degrading gracefully) — used in OpenAI text-embedding-3 and Nomic.
+- "What's MTEB?" → Massive Text Embedding Benchmark; the standard for ranking embedding models. Check current leaderboard rather than trusting paper-time numbers.
+
+**Common mistakes.**
+- Picking by MTEB score alone — your domain may differ; benchmark on a slice of your data.
+- Forgetting embedding-dim is a storage / serving cost downstream.
+
+**References.**
+- [Muennighoff et al. — "MTEB"](https://arxiv.org/abs/2210.07316).
+- [Kusupati et al. — "Matryoshka Representation Learning"](https://arxiv.org/abs/2205.13147).
+- [OpenAI text-embedding-3 announcement](https://openai.com/index/new-embedding-models-and-api-updates/).
+
+---
+
+### Q: What is Self-RAG / Corrective RAG, and what problem do they solve?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [self-rag, crag, adaptive-rag]
+
+**Short answer.** Vanilla RAG retrieves once and trusts the result. **Self-RAG** (Asai et al. 2023) trains the model to decide *when* to retrieve, *whether retrieved passages are relevant*, and *whether its own outputs are supported* — emitting special control tokens for each. **Corrective RAG (CRAG)** (Yan et al. 2024) adds a separate retriever-quality classifier; if retrievals are bad, falls back to web search or generation-without-RAG. Both address the "retrieval is sometimes worse than nothing" problem.
+
+**Expansion / why this is the answer.**
+- **Failure mode they target**:
+  - Retrieval miss: retrieved passages are irrelevant; the model is misled.
+  - Over-retrieval: model retrieves when it already knows the answer; wasted latency, sometimes adds noise.
+  - Hallucination despite retrieval: model ignores the passages, makes things up.
+- **Self-RAG** (training-time approach):
+  - Model emits `[Retrieve]` / `[No Retrieve]` decisions.
+  - For each retrieved doc, emits `[Relevant]` / `[Irrelevant]`.
+  - For each generated statement, emits `[Supported]` / `[Partially Supported]` / `[Unsupported]`.
+  - Trained on a critic-labeled dataset.
+  - Inference: parses these tokens; can skip irrelevant docs, abstain when unsupported.
+- **CRAG** (inference-time approach):
+  - Separately-trained retriever-quality classifier scores each retrieved doc.
+  - High → use docs.
+  - Low → fall back to web search.
+  - Ambiguous → augment with web search.
+- **Adaptive RAG** (Jeong et al. 2024): a query classifier predicts "no RAG needed" / "single-hop" / "multi-hop" and routes.
+- **Where these win**:
+  - Diverse query distribution where one-size-fits-all retrieval fails.
+  - Long-tail of queries where retrieval quality varies.
+- **Where they lose**:
+  - Latency cost (extra classifiers / decisions).
+  - Training complexity.
+
+**Common follow-ups.**
+- "Is this strictly better than vanilla RAG?" → Not always; adds cost and complexity. Worth it when the retrieval-quality variance is high.
+- "What's the relationship to agentic RAG?" → Self-RAG/CRAG are *inline* decision frameworks (not multi-hop loops). Agentic RAG is multi-turn.
+
+**Common mistakes.**
+- Treating these as replacements for retrieval-quality fixes (better chunking, better embeddings) — they're *complementary*.
+
+**References.**
+- [Asai et al. — "Self-RAG"](https://arxiv.org/abs/2310.11511).
+- [Yan et al. — "Corrective Retrieval Augmented Generation"](https://arxiv.org/abs/2401.15884).
+- [Jeong et al. — "Adaptive-RAG"](https://arxiv.org/abs/2403.14403).
+
+---
+
+### Q: What's the difference between sparse, dense, and multi-vector retrieval — concisely?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [retrieval, sparse, dense, multi-vector]
+
+**Short answer.** **Sparse** (BM25, SPLADE): represent each doc as a sparse vector over the vocabulary; matches on terms / lexical signal. **Dense** (SBERT, BGE, OpenAI embeddings): single fixed-dim vector per doc; matches on semantic similarity. **Multi-vector** (ColBERT, ColBERTv2): per-token vectors per doc; "late interaction" via MaxSim; captures fine-grained alignment. In production: hybrid sparse + dense by default; multi-vector when precision at low-k matters and storage budget allows.
+
+**Expansion / why this is the answer.**
+- **Sparse**:
+  - BM25 (classical TF-IDF variant): sparse term-frequency vector + IDF weighting.
+  - SPLADE (learned sparse): BERT produces sparse representations; competitive with dense.
+  - Strength: exact-token signal, rare-word matching, named entities, identifiers.
+- **Dense**:
+  - Dual-encoder: fixed `d`-dim vector per doc.
+  - Strength: semantic similarity, paraphrase, cross-lingual (with multilingual model).
+  - Weakness: mean-pooling loses fine-grained token-level signal.
+- **Multi-vector**:
+  - Token-level embeddings (per token); similarity via `Σ_q max_d (q_i · d_j)` (MaxSim).
+  - Strength: best of both worlds — semantic + token-precision.
+  - Cost: index size ~10–30× a dense index.
+- **Decision rubric**:
+  - General-purpose retrieval: hybrid sparse + dense.
+  - Precision at low-k matters, storage abundant: multi-vector (ColBERTv2 + PLAID).
+  - Resource-constrained: dense alone, with strong embeddings.
+
+**Common follow-ups.**
+- "Why is dense sometimes worse than BM25 on a benchmark?" → Named entities, exact strings, very-out-of-domain queries.
+- "What's PLAID?" → ColBERTv2's production indexing — clusters + compressed token vectors; fast and small enough for production.
+
+**Common mistakes.**
+- Calling SPLADE "dense" — it's learned but sparse.
+- Conflating multi-vector with multi-query.
+
+**References.**
+- [Khattab & Zaharia — "ColBERT"](https://arxiv.org/abs/2004.12832).
+- [Formal et al. — "SPLADE"](https://arxiv.org/abs/2107.05720).
+- [Robertson & Zaragoza — BM25 reference](https://www.staff.city.ac.uk/~sb317/papers/foundations_bm25_review.pdf).
+
+---

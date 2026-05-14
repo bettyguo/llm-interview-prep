@@ -777,3 +777,376 @@ if __name__ == "__main__":
 ```
 
 ---
+
+### Q: Implement the DPO loss in PyTorch.
+
+**Category:** coding
+**Difficulty:** senior
+**Tags:** [dpo, preference-optimization, pytorch]
+
+**Short answer.** For each preference triple `(x, y_w, y_l)`, compute the log-prob of `y_w` and `y_l` under both the policy and the reference; take the difference of log-ratios; apply `−log σ(β · (Δ_w − Δ_l))`. Standard PyTorch with `gather` to pick the correct token-id log-probs.
+
+**Expansion / why this is the answer.**
+- The math: `L_DPO = -log σ(β · [log π_θ(y_w|x)/π_ref(y_w|x) − log π_θ(y_l|x)/π_ref(y_l|x)])`.
+- Token-level: sum log-probs over the response tokens (mask the prompt tokens).
+- The reference model is frozen.
+
+**Common follow-ups.**
+- "Why mask the prompt log-probs?" → Identical between policy and ref for the prompt; only the response carries signal.
+- "How do you avoid the 'decreased likelihood' DPO pathology?" → Add an SFT term: `L = L_DPO + α · L_SFT(y_w)`.
+
+**Common mistakes.**
+- Including the prompt tokens in the log-prob sum.
+- Detaching the policy log-probs (gradients won't flow).
+- Forgetting `torch.no_grad()` on the reference forward pass.
+
+**Implementation.**
+```python
+import torch
+import torch.nn.functional as F
+
+
+def gather_logp(logits: torch.Tensor, labels: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Per-sample sum of log-probs over masked tokens.
+
+    logits: (B, T, V), labels: (B, T), mask: (B, T) — 1 for response tokens, 0 elsewhere.
+    Assumes logits[t] predicts labels[t] (already shifted).
+    """
+    logp = F.log_softmax(logits, dim=-1)
+    per_token = logp.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)  # (B, T)
+    return (per_token * mask).sum(dim=-1)  # (B,)
+
+
+def dpo_loss(
+    policy_logits_w: torch.Tensor, policy_logits_l: torch.Tensor,
+    ref_logits_w: torch.Tensor, ref_logits_l: torch.Tensor,
+    labels_w: torch.Tensor, labels_l: torch.Tensor,
+    mask_w: torch.Tensor, mask_l: torch.Tensor,
+    beta: float = 0.1,
+) -> torch.Tensor:
+    """Standard DPO loss (Rafailov et al. 2023).
+
+    Each *_logits is shape (B, T, V); labels (B, T); mask (B, T) marks response tokens.
+    Returns scalar loss.
+    """
+    pol_w = gather_logp(policy_logits_w, labels_w, mask_w)
+    pol_l = gather_logp(policy_logits_l, labels_l, mask_l)
+    with torch.no_grad():
+        ref_w = gather_logp(ref_logits_w, labels_w, mask_w)
+        ref_l = gather_logp(ref_logits_l, labels_l, mask_l)
+    log_ratio_w = pol_w - ref_w
+    log_ratio_l = pol_l - ref_l
+    margin = beta * (log_ratio_w - log_ratio_l)
+    return -F.logsigmoid(margin).mean()
+
+
+if __name__ == "__main__":
+    B, T, V = 2, 6, 100
+    torch.manual_seed(0)
+    pol_w = torch.randn(B, T, V, requires_grad=True)
+    pol_l = torch.randn(B, T, V, requires_grad=True)
+    ref_w = torch.randn(B, T, V)
+    ref_l = torch.randn(B, T, V)
+    labels_w = torch.randint(0, V, (B, T))
+    labels_l = torch.randint(0, V, (B, T))
+    mask_w = torch.ones(B, T)
+    mask_l = torch.ones(B, T)
+    loss = dpo_loss(pol_w, pol_l, ref_w, ref_l, labels_w, labels_l, mask_w, mask_l, beta=0.1)
+    loss.backward()
+    print(f"DPO loss = {loss.item():.4f}")
+```
+
+---
+
+### Q: Implement a simple beam search.
+
+**Category:** coding
+**Difficulty:** mid
+**Tags:** [beam-search, decoding]
+
+**Short answer.** Maintain a min-heap of `(score, sequence)` for the top-K beams. At each step, expand every beam by every token, compute new cumulative log-prob, keep the top-K. Stop when all beams emit EOS or hit max length. Use length-normalized scoring to avoid the "shorter sequence wins" bias.
+
+**Expansion / why this is the answer.**
+- The standard beam-search algorithm; not used for open-ended LLM generation (favors generic continuations) but useful for translation / constrained decoding.
+- Length normalization: divide cumulative log-prob by `(length^α)` with α ∈ [0.5, 1.0].
+
+**Common follow-ups.**
+- "Why is beam search worse than sampling for open text?" → Mode-seeking; produces "safe" generic output (Holtzman et al. 2019).
+- "What's diverse beam search?" → Partition beams into groups; penalize within-group similarity.
+
+**Common mistakes.**
+- Not length-normalizing — short beams dominate.
+- Sorting beams by raw score instead of normalized score.
+
+**Implementation.**
+```python
+import math
+import heapq
+from typing import Callable
+
+
+def beam_search(
+    next_token_logprobs: Callable[[list[int]], list[float]],
+    initial_token: int,
+    eos_token: int,
+    beam_size: int = 4,
+    max_len: int = 50,
+    length_penalty: float = 0.7,
+) -> list[int]:
+    """Toy beam search.
+
+    next_token_logprobs(prefix) -> list[float] of log-probs over the vocab.
+    """
+    # Beams: list of (normalized_score, raw_logprob_sum, sequence, finished)
+    beams: list[tuple[float, float, list[int], bool]] = [(0.0, 0.0, [initial_token], False)]
+    for step in range(max_len):
+        candidates: list[tuple[float, float, list[int], bool]] = []
+        for norm_score, raw_score, seq, finished in beams:
+            if finished:
+                candidates.append((norm_score, raw_score, seq, finished))
+                continue
+            logprobs = next_token_logprobs(seq)
+            # Top beam_size next tokens for this beam
+            top = sorted(enumerate(logprobs), key=lambda kv: -kv[1])[:beam_size]
+            for tok, lp in top:
+                new_seq = seq + [tok]
+                new_raw = raw_score + lp
+                new_norm = new_raw / (len(new_seq) ** length_penalty)
+                done = (tok == eos_token)
+                candidates.append((new_norm, new_raw, new_seq, done))
+        # Keep top beam_size by normalized score
+        beams = sorted(candidates, key=lambda b: -b[0])[:beam_size]
+        if all(b[3] for b in beams):
+            break
+    return beams[0][2]
+
+
+if __name__ == "__main__":
+    # Toy: simulate a model that always likes token 1, then 2, then 3, then EOS (=0).
+    import random
+    rng = random.Random(0)
+
+    def fake_logprobs(prefix: list[int]) -> list[float]:
+        VOCAB = 5
+        preferred = (sum(prefix) + 1) % VOCAB  # deterministic but non-trivial
+        out = [-5.0] * VOCAB
+        out[preferred] = -0.1
+        return out
+
+    seq = beam_search(fake_logprobs, initial_token=4, eos_token=0, beam_size=3, max_len=10)
+    print("beam result:", seq)
+```
+
+---
+
+### Q: Implement min-p sampling.
+
+**Category:** coding
+**Difficulty:** mid
+**Tags:** [sampling, min-p, decoding]
+
+**Short answer.** Min-p sampling (Nguyen et al. 2024) keeps tokens with probability `≥ min_p · p_top`, where `p_top` is the largest probability. Adaptive: a peaked distribution keeps few tokens, a flat one keeps many. Less sensitive than top-p to long-tail noise.
+
+**Expansion / why this is the answer.**
+- Idea: instead of cumulative-probability threshold (top-p), use a relative-to-top threshold.
+- More robust to distributions with a heavy tail of low-probability noise.
+- Common params: `min_p = 0.05–0.1`; `T = 0.7–1.0`.
+
+**Common follow-ups.**
+- "When does min-p beat top-p?" → Long-tailed distributions where top-p includes many implausible tokens; min-p prunes them.
+
+**Common mistakes.**
+- Confusing `min_p` (relative threshold) with a fixed minimum probability.
+- Forgetting to renormalize after pruning.
+
+**Implementation.**
+```python
+import numpy as np
+
+
+def min_p_sample(logits: np.ndarray, min_p: float = 0.05, temperature: float = 1.0, rng: np.random.Generator | None = None) -> int:
+    rng = rng or np.random.default_rng()
+    logits = logits / max(temperature, 1e-6)
+    probs = np.exp(logits - logits.max())
+    probs = probs / probs.sum()
+    p_top = probs.max()
+    threshold = min_p * p_top
+    mask = probs >= threshold
+    probs_kept = probs * mask
+    probs_kept = probs_kept / probs_kept.sum()
+    return int(rng.choice(len(probs), p=probs_kept))
+
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(0)
+    logits = rng.normal(size=20)
+    tok = min_p_sample(logits, min_p=0.1, temperature=0.7, rng=rng)
+    print("sampled token id:", tok)
+```
+
+---
+
+### Q: Implement greedy and stochastic KV-cache update for autoregressive decode.
+
+**Category:** coding
+**Difficulty:** senior
+**Tags:** [kv-cache, decode-step, autoregressive]
+
+**Short answer.** Maintain `K_cache, V_cache` of shape `(B, H, T_cache, D)`. For each decode step: compute `Q, K_new, V_new` for the single new token; concatenate `K_new, V_new` into the cache; compute attention `softmax(Q · K_cacheᵀ / √D) · V_cache`; feed through the rest of the transformer; sample / argmax the next token. The cache grows by one position per step; never re-encode the prompt.
+
+**Expansion / why this is the answer.**
+- Key insight: at decode step `t`, only `Q` is recomputed (for the new position); `K_cache` and `V_cache` are reused.
+- Memory cost: linear in T.
+- Compute cost per step: `O(T · d)` for attention (vs. `O(T² · d)` if we re-attended).
+
+**Common follow-ups.**
+- "How does paged attention change this?" → Cache stored in pages; lookup via a block table; otherwise the same algorithm.
+- "What's the GQA effect?" → `K_cache` and `V_cache` have shape `(B, n_kv_heads, T, d_head)` where `n_kv_heads < n_heads`.
+
+**Common mistakes.**
+- Re-encoding the full prompt every step.
+- Forgetting to use causal mask (here implicit: there's only one query position, so no future to mask).
+
+**Implementation.**
+```python
+import numpy as np
+
+
+def attention_decode_step(
+    q: np.ndarray,         # (B, H, 1, D)
+    k_cache: np.ndarray,   # (B, H, T, D)
+    v_cache: np.ndarray,   # (B, H, T, D)
+    k_new: np.ndarray,     # (B, H, 1, D)
+    v_new: np.ndarray,     # (B, H, 1, D)
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """One decode step: append k_new/v_new to cache, attend over the full cache.
+
+    Returns (output, updated_k_cache, updated_v_cache).
+    """
+    k_cache = np.concatenate([k_cache, k_new], axis=2)
+    v_cache = np.concatenate([v_cache, v_new], axis=2)
+    D = q.shape[-1]
+    scores = q @ k_cache.transpose(0, 1, 3, 2) / np.sqrt(D)  # (B, H, 1, T+1)
+    # No causal mask: only one query position, attending to past + itself.
+    scores_max = scores.max(axis=-1, keepdims=True)
+    attn = np.exp(scores - scores_max)
+    attn = attn / attn.sum(axis=-1, keepdims=True)
+    out = attn @ v_cache  # (B, H, 1, D)
+    return out, k_cache, v_cache
+
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(0)
+    B, H, T, D = 1, 4, 5, 16
+    # Empty cache initially
+    k_cache = np.zeros((B, H, 0, D))
+    v_cache = np.zeros((B, H, 0, D))
+    for step in range(T):
+        q = rng.normal(size=(B, H, 1, D))
+        k_new = rng.normal(size=(B, H, 1, D))
+        v_new = rng.normal(size=(B, H, 1, D))
+        out, k_cache, v_cache = attention_decode_step(q, k_cache, v_cache, k_new, v_new)
+    print("after", T, "steps; k_cache shape:", k_cache.shape)
+    assert k_cache.shape == (B, H, T, D)
+    print("KV cache OK")
+```
+
+---
+
+### Q: Implement gradient accumulation manually (without `torch.amp` magic).
+
+**Category:** coding
+**Difficulty:** mid
+**Tags:** [gradient-accumulation, training-loop, pytorch]
+
+**Short answer.** Divide the loss by `accum_steps`; backward each micro-batch (gradients accumulate in `.grad`); call `optimizer.step()` once every `accum_steps`; zero gradients after each step. Effective batch = `micro_batch × accum_steps × num_GPUs`.
+
+**Expansion / why this is the answer.**
+- PyTorch accumulates gradients across backward calls by default; this is what makes the technique simple.
+- Why divide loss by accum_steps: to keep the gradient magnitude equivalent to one big-batch forward pass.
+
+**Common follow-ups.**
+- "How does this differ from DDP-style data parallel?" → Accumulation simulates a bigger batch on one GPU; DDP runs the bigger batch across GPUs with gradient all-reduce per step.
+
+**Common mistakes.**
+- Not dividing loss by accum_steps (effective gradient is `accum_steps`× too large).
+- Stepping every micro-batch instead of every `accum_steps`.
+
+**Implementation.**
+```python
+import torch
+import torch.nn as nn
+
+
+def train_one_epoch(model: nn.Module, loader, optimizer, *, accum_steps: int = 4, device: str = "cuda"):
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    for step, (x, y) in enumerate(loader, start=1):
+        x, y = x.to(device), y.to(device)
+        logits = model(x)
+        loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+        # Scale so accumulated gradients average instead of summing
+        (loss / accum_steps).backward()
+        if step % accum_steps == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+```
+
+---
+
+### Q: Implement a sliding-window attention from scratch.
+
+**Category:** coding
+**Difficulty:** senior
+**Tags:** [sliding-window, attention, mistral]
+
+**Short answer.** Same scaled dot-product attention but mask out scores where `|i - j| > window` (or for causal SWA, `i - j > window` or `j > i`). At inference, the KV cache can be capped at `window` tokens.
+
+**Expansion / why this is the answer.**
+- Mistral 7B's SWA: causal + window. Mask anything where `j > i` (future) or `j < i - window + 1` (too far in the past).
+- Memory: KV cache truncated to `window`.
+
+**Common follow-ups.**
+- "What about the KV-cache implication?" → Cache size capped at `window`; older entries evicted.
+- "How does this interact with RoPE?" → RoPE positions are absolute; SWA caps the attention range, not the position encoding.
+
+**Common mistakes.**
+- Off-by-one in window boundary.
+- Forgetting the causal mask (this is *causal* SWA).
+
+**Implementation.**
+```python
+import numpy as np
+
+
+def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    x_max = np.max(x, axis=axis, keepdims=True)
+    e = np.exp(x - x_max)
+    return e / np.sum(e, axis=axis, keepdims=True)
+
+
+def swa_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray, window: int) -> np.ndarray:
+    """Causal sliding-window attention. Q, K, V: (B, H, T, D)."""
+    B, H, T, D = Q.shape
+    scores = Q @ K.transpose(0, 1, 3, 2) / np.sqrt(D)  # (B, H, T, T)
+    # Build mask: position i can attend to j iff i - window + 1 <= j <= i.
+    i = np.arange(T)[:, None]
+    j = np.arange(T)[None, :]
+    allowed = (j <= i) & (j > i - window)
+    mask = ~allowed  # True where we mask out
+    scores = np.where(mask, -np.inf, scores)
+    attn = softmax(scores, axis=-1)
+    return attn @ V
+
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(0)
+    B, H, T, D = 1, 2, 8, 16
+    Q, K, V = (rng.normal(size=(B, H, T, D)) for _ in range(3))
+    out = swa_attention(Q, K, V, window=3)
+    assert out.shape == (B, H, T, D)
+    print("SWA output shape:", out.shape, "(window=3)")
+```
+
+---

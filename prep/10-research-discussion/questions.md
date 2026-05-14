@@ -298,3 +298,160 @@ The volume of arXiv posts in 2026 is impossible to fully track; the goal is *not
 The interviewer wants to know you have an actual research-reading habit, not that you frantically catch up the night before. A confident answer that says "I read deeply over breadth" beats one that name-drops 50 papers. What works well: a specific current example ("I read X last week; my take is Y"); a named newsletter; a reading log. What works poorly: "I read everything on arXiv"; name-dropping without depth.
 
 ---
+
+### Q: Walk me through the DeepSeek-V3 tech report.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [deepseek-v3, moe, paper-deep-dive]
+
+**Short answer.** **Contribution**: 671B-total / 37B-active MoE LLM trained in FP8 on 14.8T tokens; competitive with frontier closed models at ~$5.5M training cost. **Method**: multi-head latent attention (MLA, smaller KV cache than GQA), fine-grained MoE (256 routed + 1 shared expert, top-8), multi-token prediction (MTP) training, FP8 training stack. **Eval**: matches/beats GPT-4o and Claude 3.5 Sonnet on many reasoning + code benchmarks at a fraction of training cost. **Why it matters**: established that open-weight frontier-class models are economically feasible; FP8 training viability; MLA + fine-grained MoE as a serving-economic shape.
+
+**Expansion / why this is the answer.**
+- **Architecture**:
+  - **MLA** (multi-head latent attention): K and V derived from a small shared latent vector; KV cache an order of magnitude smaller than GQA.
+  - **Fine-grained MoE**: 256 routed experts (vs. Mixtral's 8), 1 shared expert always active. 8 routed + 1 shared per token = 37B active params.
+  - **MTP heads** during training: dense supervision; also doubles as speculative-decoding draft heads at inference.
+- **Training**:
+  - **FP8 throughout**: first production-scale model trained primarily in FP8.
+  - **14.8T tokens**: substantial corpus.
+  - **Auxiliary-loss-free load balancing** for MoE: a bias adjustment that gets load-balancing without the auxiliary loss's distortion.
+- **Eval**: strong on MATH, MMLU-Pro, GPQA, LiveCodeBench, SWE-bench Verified — competitive with the strongest closed models at the time.
+- **Why this is a notable paper**:
+  - First open-weight model that's plausibly frontier-class.
+  - The serving-economic architecture (MLA + fine-grained MoE) made it feasible to deploy at a per-token cost competitive with closed models.
+  - FP8 training at this scale was previously unproven in public.
+- **30-second version**: "DeepSeek-V3 is a 671B-total / 37B-active MoE trained in FP8 on 14.8T tokens. Architectural innovations: MLA (KV cache reduction), fine-grained MoE (256 experts), MTP training objective. Demonstrates that open-weight frontier-class models are economically feasible."
+
+**Common follow-ups.**
+- "How does MLA compare to GQA?" → MLA factorizes through a small latent; KV cache is even smaller. Quality slightly different; DeepSeek-V3's results suggest competitive.
+- "Why no auxiliary balancing loss?" → They report auxiliary-loss-free balancing works better — adjusts expert biases dynamically instead.
+
+**Common mistakes.**
+- Treating it as "yet another MoE model" — the contributions are architectural + training-stack.
+
+**References.**
+- [DeepSeek-AI — "DeepSeek-V3 Technical Report"](https://arxiv.org/abs/2412.19437) — primary.
+- [DeepSeek-V2 paper](https://arxiv.org/abs/2405.04434) — MLA predecessor.
+
+---
+
+### Q: Walk me through the FlashAttention paper.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [flashattention, paper-deep-dive, kernel]
+
+**Short answer.** **Contribution**: an IO-aware exact attention kernel that tiles the computation so the `n × n` attention matrix never lives in HBM. Tiles of Q, K, V are loaded into on-chip SRAM; partial softmax statistics maintained online; output accumulated tile by tile. **Result**: same numerical output as standard attention, 2–4× wall-clock speedup on long sequences, lower memory. **Why it matters**: enabled longer-context training and inference at the same cost; became the de facto default attention kernel (PyTorch SDPA's "flash" backend).
+
+**Expansion / why this is the answer.**
+- **The bottleneck FlashAttention attacks**: naive attention materializes the `n × n` softmax matrix in HBM. For seq length 8k that's 64M entries per head per batch; HBM bandwidth dominates wall time.
+- **The trick**:
+  - Tile Q, K, V into blocks that fit in SRAM (the GPU's fast on-chip memory).
+  - For each Q-tile, iterate over K-tile and V-tile blocks; compute partial logits, accumulate the output with an online-softmax algorithm that maintains the running max and sum.
+  - The `n × n` matrix is never fully materialized.
+- **Numerically exact**: the online-softmax (Milakov & Gimelshein 2018) is provably equivalent to the standard softmax; FlashAttention is *not* approximate.
+- **Backward pass**: similar tiling; recomputes softmax from the saved statistics (no need to store the attention matrix).
+- **FlashAttention-2** (Dao 2023): better parallelization across heads and sequence positions; ~2× faster than v1.
+- **FlashAttention-3** (Shah et al. 2024): Hopper-specific (FP8, async warp specialization); leverages H100 features.
+- **What it doesn't change**:
+  - Doesn't reduce FLOPs.
+  - Doesn't change model behavior.
+- **Why this is on every paper-deep-dive list**:
+  - Practical impact: every modern training stack uses it.
+  - Method elegance: the IO-aware framing was novel.
+  - Made long-context training affordable.
+
+**Common follow-ups.**
+- "Is FlashAttention sparse?" → No; it's dense (computes the full attention matrix's effect; just doesn't materialize it in HBM).
+- "How does it compare to sparse attention (Longformer, Big Bird)?" → Sparse attention computes *fewer* entries (reduces FLOPs); FlashAttention computes the *same* entries but with better memory layout (reduces HBM traffic).
+
+**Common mistakes.**
+- Calling FlashAttention an approximation.
+- Confusing it with linear-attention methods (Performer, Linformer).
+
+**References.**
+- [Dao et al. — "FlashAttention"](https://arxiv.org/abs/2205.14135).
+- [Dao — "FlashAttention-2"](https://arxiv.org/abs/2307.08691).
+- [Shah et al. — "FlashAttention-3"](https://arxiv.org/abs/2407.08608).
+
+---
+
+### Q: Walk me through the Mixtral / MoE paper.
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [mixtral, moe, paper-deep-dive]
+
+**Short answer.** **Contribution**: Mixtral 8x7B (47B total, 13B active) — first open-weight MoE that matched GPT-3.5-class quality. **Method**: 8 experts per FFN sublayer, top-2 routing, GQA attention, otherwise standard transformer. **Eval**: matches or beats Llama 2 70B at ~5× lower per-token compute. **Why it matters**: proved MoE viable for open-weight LLMs; established the "decouple total params from active compute" pattern that DeepSeek-V3 later extended.
+
+**Expansion / why this is the answer.**
+- **Architecture**:
+  - Each transformer block has 8 FFN experts.
+  - Per token, top-2 experts active; routing via a small gating network.
+  - Active params per token: ~13B; total: 47B.
+- **GQA attention**: shared with the Mistral 7B base.
+- **Load balancing**: standard MoE auxiliary loss.
+- **Eval**:
+  - Matches GPT-3.5 on most benchmarks.
+  - Beats Llama 2 70B on most reasoning + code benchmarks.
+  - Inference cost approximately matches 13B dense model.
+- **Mixtral 8x22B** (April 2024): scaled-up version; 141B total, 39B active.
+- **Why this is a paper-deep-dive question**:
+  - Established MoE viability at the open-weight scale.
+  - The "active vs. total" economic decoupling is now standard.
+  - Predecessor to DeepSeek-V3's fine-grained MoE.
+
+**Common follow-ups.**
+- "Why top-2 instead of top-1?" → Top-1 (Switch Transformer) is faster; top-2 gives more parameter use per token; quality typically better.
+- "How does Mixtral compare to DeepSeek-V3's fine-grained MoE?" → Mixtral: few coarse experts (8). DeepSeek: many fine-grained (256). Fine-grained empirically does better per active-param.
+
+**Common mistakes.**
+- Calling Mixtral "8 separate 7B models" — only the FFN is partitioned across experts; attention is shared.
+- Confusing 47B total params with 13B active (the cost is the latter for compute, the former for memory).
+
+**References.**
+- [Jiang et al. — "Mixtral of Experts"](https://arxiv.org/abs/2401.04088).
+- [Fedus et al. — "Switch Transformer"](https://arxiv.org/abs/2101.03961) — predecessor.
+
+---
+
+### Q: How would you structure a 30-minute job-talk on your own research?
+
+**Category:** behavioral
+**Difficulty:** senior
+**Tags:** [research-talk, presentation, job-talk]
+
+**Short answer.** Structure: (1) **The big problem** (2 minutes — the field-level motivation). (2) **My thesis / contribution** (1 minute — the one-sentence claim). (3) **Background** (5 minutes — minimum needed for the audience). (4) **Method** (10 minutes — the core technical content). (5) **Results** (5 minutes — headline + key ablation). (6) **Limitations + future work** (3 minutes — credibility-building). (7) **Q&A** (4 minutes). Leave 5+ minutes for questions; talks always run long.
+
+**Expansion / why this is the answer.**
+The structure interviewers expect for a research talk:
+- **Open with the big problem**, not the method. "Why should the audience care?"
+- **State the contribution upfront** — don't bury the lede.
+- **Background**: just enough; trust the audience.
+- **Method**: visual diagrams; one equation per slide max; build intuition before formality.
+- **Results**: the headline (your strongest table/figure) + one ablation that shows the method is doing what you claim.
+- **Limitations**: critical for credibility. Audiences trust speakers who acknowledge what doesn't work.
+- **Future work**: 1–2 concrete directions; signals what's next, not "and they all lived happily ever after."
+- **Q&A**: never the rushed bit at the end. Time-budget for it.
+
+Common job-talk failure modes:
+- **Too much method, no motivation**: audience checks out in minute 4.
+- **Too much background**: nothing original in 15 minutes.
+- **No headline result**: audience leaves not knowing what was achieved.
+- **No limitations**: signals over-confidence.
+- **Run over time**: cardinal sin; cut content, don't rush.
+
+**Common follow-ups.**
+- "How do you handle a hostile question?" → Acknowledge, agree where you can, disagree on substance. Never get defensive.
+- "What if you don't know the answer?" → "I don't know — let me think... my best guess is X but I'd want to verify."
+
+**Common mistakes.**
+- Spending 20 minutes on method, 5 on results.
+- Not rehearsing; live-talking yields chaos.
+- Going over time.
+
+**Signal.**
+A research talk is a hiring signal at researcher / staff levels: communication, taste in what's important, ownership of limitations, clarity under pressure. The structure above is the recipe; rehearsal makes it work.
+
+---

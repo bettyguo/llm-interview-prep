@@ -513,3 +513,266 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Jurafsky & Martin — *Speech and Language Processing*, §B](https://web.stanford.edu/~jurafsky/slp3/) — intrinsic vs extrinsic.
 
 ---
+
+### Q: How does Chatbot Arena work, and why do people trust it?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [chatbot-arena, elo, pairwise, lmsys]
+
+**Short answer.** Chatbot Arena (LMSYS) is a crowdsourced pairwise comparison platform: users submit a prompt, get back two anonymous model responses, pick the better one. Pairwise votes are aggregated via the Bradley-Terry / Elo model into a public leaderboard. People trust it because it (a) uses real user prompts, not curated benchmarks; (b) is resistant to overfitting because models can't game prompts they don't see; (c) measures *user preference*, not a proxy capability; (d) has a very large sample size (millions of votes).
+
+**Expansion / why this is the answer.**
+- **Mechanism**:
+  1. User enters a prompt.
+  2. Two anonymized model responses shown.
+  3. User picks (A wins / B wins / tie / both bad).
+  4. Vote aggregated; identities revealed.
+- **Ranking math**:
+  - Bradley-Terry model: `P(A beats B) = σ(r_A − r_B)`.
+  - From pairwise outcomes, fit per-model ratings `r_i`.
+  - Equivalent to a chess-style Elo system with logistic scoring.
+- **Why people trust it**:
+  - **Real users, real prompts**: distribution matches actual use.
+  - **Contamination-resistant**: prompts are user-supplied; models can't memorize.
+  - **Sample size**: hundreds of thousands to millions of votes per model.
+  - **Confidence intervals**: error bars published per model.
+- **Caveats**:
+  - **User-skew bias**: heavy ChatGPT/Claude users tend to favor those models' styles.
+  - **English-heavy**: less reliable for non-English performance.
+  - **Length bias**: long answers tend to win — adjusted scoring (Arena Hard, Arena Hard-Auto) controls for this.
+  - **No ground truth**: pure preference, not correctness.
+- **Variants**:
+  - **Arena Hard** (Li et al. 2024): a curated subset; emphasizes harder prompts.
+  - **Style Control**: adjustments for length / markdown / refusal style.
+
+**Common follow-ups.**
+- "How do they prevent gaming?" → Pairwise + anonymity; rate limiting; bot detection.
+- "Is the ranking transitive?" → Approximately under Bradley-Terry; not strictly transitive in practice (rock-paper-scissors triples can exist).
+
+**Common mistakes.**
+- Treating Arena Elo as an absolute capability measure; it's a preference measure.
+- Comparing Arena ranks across very different model classes (vision vs. text) — different leaderboards.
+
+**References.**
+- [Zheng et al. — "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena"](https://arxiv.org/abs/2306.05685) — Arena methodology.
+- [LMSYS Chatbot Arena](https://lmarena.ai/) — primary.
+
+---
+
+### Q: How do you evaluate creative tasks (writing, code-style)?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [creative-eval, subjective, llm-as-judge]
+
+**Short answer.** No single metric works. The toolkit: (a) **pairwise human preference** on a rubric (clearer, more interesting, more on-topic); (b) **LLM-as-judge pairwise** calibrated to the human set; (c) **specific quality dimensions** scored separately (coherence, factuality, style match); (d) **task-specific eval** (does the joke land? does the code compile?). Combine; report multiple dimensions; never reduce to one number for creative tasks.
+
+**Expansion / why this is the answer.**
+- **Why a single metric fails**:
+  - Multiple competing dimensions: creativity vs. accuracy, conciseness vs. depth.
+  - Subjective: different readers prefer different things.
+  - No "ground truth" for an open creative prompt.
+- **Methods**:
+  - **Pairwise human**: most reliable for relative ranking. Slow, expensive. Calibrate inter-rater agreement.
+  - **Single-grade rubric**: faster; rater drift risk.
+  - **LLM-as-judge**: cheap; calibrate against the human set.
+  - **Reference-based**: when "good answers" exist, compare against reference (Bleu / ROUGE for translation/summarization, with known limits).
+  - **Task-specific**: a joke is funny if it lands with the audience; code style passes a linter / matches the team's conventions.
+- **For code-style**:
+  - Linter / formatter compliance (deterministic).
+  - PR-acceptance rate.
+  - Code-review scores (LLM-judge or human).
+- **For creative writing**:
+  - Multi-dimensional: coherence, voice, originality, factuality.
+  - Avoid average-into-one-number; report each dim.
+- **Failure modes**:
+  - LLM judges favor verbose / hedging output for "creative" tasks — adversarial to creative writing's compactness.
+  - Single rater drift.
+
+**Common follow-ups.**
+- "How would you eval poetry?" → Probably mostly human; LLM judges aren't reliable on aesthetic judgments.
+- "How do you avoid LLM judges hallucinating quality?" → Reference-based grading where possible; tight rubrics; human calibration.
+
+**Common mistakes.**
+- Reducing creative quality to one score.
+- Trusting LLM-as-judge on a task with no human calibration.
+
+**References.**
+- [Chiang et al. — "Can Large Language Models Be an Alternative to Human Evaluations?"](https://arxiv.org/abs/2305.01937) — LLM-as-judge for subjective tasks.
+- [Zheng et al. — MT-Bench](https://arxiv.org/abs/2306.05685) — judge calibration.
+
+---
+
+### Q: How do you evaluate an agent's tool-use accuracy?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [agent-eval, tool-use-accuracy]
+
+**Short answer.** Measure at multiple granularities: **(1) tool-selection accuracy** (right tool given the query?), **(2) argument accuracy** (correct args / types), **(3) trajectory accuracy** (correct sequence of calls), **(4) end-to-end task success**. Use a labeled eval set with ground-truth `(prompt, expected tool calls)` traces. Trace-level metrics distinguish "right tool, wrong args" from "wrong tool" — the failure modes have different fixes.
+
+**Expansion / why this is the answer.**
+- **Eval set construction**:
+  - 100–500 examples per use case.
+  - Each: `(prompt, expected_tool_call_sequence, expected_outcome)`.
+  - Include negative examples (no tool call should be made).
+- **Metrics**:
+  - **Tool-selection accuracy**: `correct_tool / total_calls`. Confusion matrix tells you which tools the model mixes up.
+  - **Argument accuracy**: structured comparison of expected vs. predicted args. Exact-match for IDs, semantic for free-text.
+  - **Trajectory F1**: treat the expected call-sequence as a set or ordered list; measure F1.
+  - **End-to-end success**: did the task succeed? Most important; depends on tool-call accuracy + downstream tool execution + response generation.
+  - **No-call-when-not-needed precision**: % of "no tool call" prompts where the agent correctly didn't call a tool.
+- **Tooling**:
+  - **τ-bench**: standardized multi-turn agent eval with structured tools.
+  - **Tool-use evals in OpenAI/Anthropic**: internal evals on tool-call format compliance.
+- **Trace inspection**:
+  - Log every tool call + args + outcome.
+  - Failed-trajectory analysis: where in the sequence did the agent go wrong?
+
+**Common follow-ups.**
+- "How do you handle multiple valid trajectories?" → Score against the *set* of valid trajectories; or use end-to-end success as the headline metric and tool-call accuracy as a diagnostic.
+- "What's tool-call latency in the budget?" → Each LLM call adds 1–5s; tool execution varies; budget per-task.
+
+**Common mistakes.**
+- Only measuring end-to-end success; can't diagnose where it broke.
+- Measuring on synthetic prompts that don't match real distribution.
+
+**References.**
+- [Yao et al. — "τ-bench"](https://arxiv.org/abs/2406.12045) — tool-use eval.
+- [BFCL — Berkeley Function-Calling Leaderboard](https://gorilla.cs.berkeley.edu/leaderboard.html) — function-calling benchmark.
+
+---
+
+### Q: What's the difference between capability eval and user-experience eval?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [capability-eval, ux-eval, evaluation-types]
+
+**Short answer.** **Capability eval**: does the model *can* do X? Tested on curated benchmarks (MMLU, HumanEval, GPQA). Holds the prompt format and difficulty constant. **UX eval**: does the model *help users* in a real product context? Tested on real or realistic prompts, with metrics that reflect end-user value (deflection, CSAT, task completion, latency). A model can be a capability beast and a UX disaster (e.g. correct but verbose / unfriendly / slow).
+
+**Expansion / why this is the answer.**
+- **Capability eval**:
+  - Static benchmarks; controlled conditions.
+  - "Could the model, in principle, do this?"
+  - Examples: MMLU, MATH, GSM8K, HumanEval, SWE-bench.
+  - Limits: synthetic prompts; benchmark contamination; doesn't reflect deployment.
+- **UX eval**:
+  - Real or realistic prompts.
+  - "Does this product help its users?"
+  - Examples: A/B test deflection rate, CSAT, task completion, time-to-resolve, repeat-question rate.
+  - Includes latency, cost, refusal-rate, conversational tone.
+- **Gaps**:
+  - A capability-strong model may UX-fail because of:
+    - Verbose responses (users prefer concise).
+    - Over-refusal (overly cautious tone).
+    - Bad formatting / no markdown.
+    - High latency.
+- **In a hiring loop**: an interviewer asking about a product is likely asking about UX eval; an interviewer asking about a model release is likely asking about capability eval. Distinguish.
+- **Modern eval frameworks** often combine both — capability suite + user-trajectory simulation.
+
+**Common follow-ups.**
+- "What's an example of a capability-strong, UX-weak model?" → Some open-weight models that score well on MMLU but are verbose / unhelpful in real chat — without instruction tuning + preference shaping.
+- "How do you bridge them?" → Hold-out user-trajectory eval set; sample real prompts and evaluate.
+
+**Common mistakes.**
+- Citing capability eval as proof of product readiness.
+- Skipping capability eval and only running UX (misses fundamental quality regressions).
+
+**References.**
+- [Bowman & Dahl — "What Will it Take to Fix Benchmarking in NLU?"](https://arxiv.org/abs/2104.02145).
+- [Liang et al. — HELM](https://arxiv.org/abs/2211.09110) — holistic eval framework.
+
+---
+
+### Q: How would you evaluate an LLM for medical or legal accuracy?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [domain-specific-eval, medical, legal, expert-eval]
+
+**Short answer.** Domain-specific eval needs **(1) expert-labeled ground truth** (medical: board-certified physician annotations; legal: licensed attorney annotations), **(2) domain-specific benchmarks** (MedQA, USMLE-style sets, LegalBench), **(3) explicit safety criteria** (no false certainty on medical advice; flag when to escalate), and **(4) reference-based grading** by domain experts rather than LLM judges. Closed-API capability scores are not enough; you need to verify in your specific use case with experts.
+
+**Expansion / why this is the answer.**
+- **Why generic eval fails**:
+  - MMLU includes medical questions but isn't a medical accuracy test.
+  - Domain-specific edge cases (drug interactions, jurisdiction-specific law) are rare in general benchmarks.
+- **Domain benchmarks**:
+  - **Medical**: MedQA (USMLE), MedMCQA, PubMedQA, MultiMedQA.
+  - **Legal**: LegalBench (Guha et al. 2023), CaseHOLD, contract review datasets.
+  - **Financial**: FinanceBench.
+- **Expert annotation**:
+  - Sample model outputs on real / realistic prompts.
+  - Have domain experts grade for: factual accuracy, safety (e.g. "did it correctly say 'see a doctor'"), citation accuracy, completeness.
+  - Inter-rater agreement metric.
+- **Safety criteria** (medical example):
+  - Model should never give a treatment recommendation that requires diagnosis.
+  - Should consistently recommend professional consultation for serious symptoms.
+  - Should not hallucinate drug dosages or interactions.
+- **LLM-as-judge limits**:
+  - On domain-specific accuracy, the judge needs to be at least as competent as the student. For specialized domains, that may mean a different LLM, or no LLM judge at all.
+- **Regulatory**:
+  - In medical: FDA software-as-a-medical-device implications.
+  - In legal: unauthorized practice of law boundaries.
+
+**Common follow-ups.**
+- "Can you use Med-PaLM as a judge?" → Med-PaLM 2 has demonstrated USMLE-passing performance; using it as a judge is possible but doesn't substitute for human review on safety-sensitive outputs.
+- "How often do you re-evaluate?" → Monthly to quarterly; every model swap; whenever the use case expands.
+
+**Common mistakes.**
+- Trusting general LLM-as-judge for medical / legal accuracy.
+- Treating MMLU score as a domain-specific competency proxy.
+
+**References.**
+- [Singhal et al. — "Med-PaLM"](https://arxiv.org/abs/2212.13138) — medical LLM eval.
+- [Guha et al. — "LegalBench"](https://arxiv.org/abs/2308.11462) — legal eval benchmark.
+- [Jin et al. — "MedQA"](https://arxiv.org/abs/2009.13081) — medical QA benchmark.
+
+---
+
+### Q: What is statistical power in A/B testing, and how do you choose sample size?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [ab-testing, power, sample-size, statistics]
+
+**Short answer.** Statistical power = `P(detect effect | effect exists)`. Typical target: 80%. Sample size depends on (a) baseline rate, (b) minimum detectable effect, (c) variance, (d) α (significance level, typically 0.05). Rule-of-thumb formula for binary outcome: `n ≈ 16 · p(1-p) / Δ²` per arm for 80% power, 5% significance, two-tailed. Under-powered tests miss real effects ("the metric didn't move" can mean "we didn't have enough samples").
+
+**Expansion / why this is the answer.**
+- **The four knobs**:
+  - **α**: false-positive rate (typically 0.05).
+  - **β**: false-negative rate (1 - power; typically 0.20).
+  - **Effect size**: the minimum effect you care about (MDE — minimum detectable effect).
+  - **Variance**: how noisy the metric is.
+- **Sample-size formulas** (per arm):
+  - **Binary outcome** (e.g. conversion rate): `n ≈ 16 · p(1-p) / Δ²` for power 80%, α 0.05.
+  - **Continuous outcome**: `n ≈ 16 · σ² / Δ²` where σ is per-user std dev.
+- **What if you're under-powered**:
+  - Can't conclude no-effect; can only conclude "didn't detect."
+  - Either: collect more data; or accept higher false-negative risk.
+- **Variance reduction techniques**:
+  - **CUPED** (Deng et al. 2013): use pre-experiment data to reduce variance — same power at smaller n.
+  - **Stratification**: split by user segments; reduces between-segment variance.
+- **Common gotchas**:
+  - **Peeking**: looking at the metric daily; inflates false-positive rate. Use sequential testing or set a fixed end date.
+  - **Multiple comparisons**: many metrics → Bonferroni or FDR correction.
+  - **Novelty effect**: short-term lift on UI changes that fades.
+- **Practical example**:
+  - Baseline conversion 5%; want to detect a 5% relative lift (Δ_abs = 0.25 pp).
+  - `n ≈ 16 · 0.05 · 0.95 / (0.0025)² ≈ 121,600` per arm.
+  - Two arms: 243k users total. Need a lot of traffic.
+
+**Common follow-ups.**
+- "What's CUPED?" → Variance-reduction technique using a pre-experiment covariate; the same A/B at smaller n.
+- "How do you handle multiple metrics?" → Pre-register the primary metric; treat others as secondary; correct for multiple testing.
+
+**Common mistakes.**
+- Concluding "no effect" from an under-powered test.
+- Peeking at results during the test.
+
+**References.**
+- [Kohavi, Tang, Xu — *Trustworthy Online Controlled Experiments*](https://experimentguide.com/) — canonical reference.
+- [Deng et al. — "CUPED"](https://exp-platform.com/Documents/2013-02-CUPED-ImprovingSensitivityOfControlledExperiments.pdf).
+
+---

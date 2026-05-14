@@ -572,3 +572,291 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Magar & Schwartz — "Data Contamination: From Memorization to Exploitation"](https://arxiv.org/abs/2203.08242) — the harm side.
 
 ---
+
+### Q: Compare PEFT methods — LoRA, prefix tuning, prompt tuning, adapters, IA³.
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [peft, lora, prefix-tuning, adapters]
+
+**Short answer.** **LoRA**: low-rank update `ΔW = BA` to weight matrices; merge-able at inference. **Prefix tuning**: prepend learned vectors to keys/values at every layer; no weight changes. **Prompt tuning**: prepend learned vectors to the input embeddings only. **Adapters**: insert small trainable bottleneck modules between layers. **IA³**: rescale activations by a learned vector. LoRA dominates in practice because it merges into the base weights (no inference overhead), trains stably, and is well-supported by tooling.
+
+**Expansion / why this is the answer.**
+- **LoRA** (Hu et al. 2021): `y = Wx + (α/r) BAx`. Parameters: `r·(d_in + d_out)`. Merge-able.
+- **Prefix tuning** (Li & Liang 2021): learn `(P_K, P_V)` per layer; concatenate to existing K, V. Per-token effect; not merge-able. Costs context-window space.
+- **Prompt tuning** (Lester et al. 2021): learn input-embedding prefix only. Less expressive than prefix tuning; cheapest by far. Works best at very large scales (10B+).
+- **Adapters** (Houlsby et al. 2019): insert `Down(GELU(Up(x))) + x` modules into the transformer. Inference overhead per forward pass. Pre-LoRA standard.
+- **IA³** (Liu et al. 2022): learn rescaling vectors `l_K, l_V, l_F` applied elementwise to K, V, and the FFN's first linear. Very few parameters; competitive at small scale.
+- **DoRA** (Liu et al. 2024): decomposes the weight into magnitude + direction; adapt direction with LoRA, magnitude separately. Modest gains over LoRA.
+- **When to pick each**:
+  - **LoRA**: default; merge for production.
+  - **Prompt tuning**: very-large-model regime with no infra for weight updates.
+  - **IA³**: param-budget-constrained.
+  - **Adapters**: legacy; or when you need modular insertable layers per task.
+- **Combinations**: LoRA + IA³ is sometimes used; mostly LoRA alone is enough.
+
+**Common follow-ups.**
+- "When is LoRA *not* enough?" → Tasks needing large knowledge addition (continued pretraining); domain shift too big for low-rank correction.
+- "What's the difference between prefix tuning and prompt tuning?" → Prefix tuning operates at every layer's K/V; prompt tuning only at the input embedding.
+
+**Common mistakes.**
+- Calling LoRA "an adapter" — it's a low-rank weight update, mathematically different.
+- Forgetting prefix/prompt tuning steal context window at inference.
+
+**References.**
+- [Hu et al. — "LoRA"](https://arxiv.org/abs/2106.09685).
+- [Li & Liang — "Prefix-Tuning"](https://arxiv.org/abs/2101.00190).
+- [Lester et al. — "Prompt Tuning"](https://arxiv.org/abs/2104.08691).
+- [Houlsby et al. — "Parameter-Efficient Transfer Learning for NLP" (adapters)](https://arxiv.org/abs/1902.00751).
+- [Liu et al. — "IA³"](https://arxiv.org/abs/2205.05638).
+- [Liu et al. — "DoRA"](https://arxiv.org/abs/2402.09353).
+
+---
+
+### Q: What is rejection sampling fine-tuning, and where does it fit in the post-training stack?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [rejection-sampling, sft, post-training]
+
+**Short answer.** Rejection sampling fine-tuning (RSFT): sample many completions per prompt from the current model, score with a reward model or verifier, keep only the high-scoring completions, then SFT on those. Cheaper and simpler than RLHF, often used as a *bootstrap* step before DPO/PPO. Llama 2/3 used rejection sampling extensively; STaR (Zelikman et al. 2022) was an early version for reasoning.
+
+**Expansion / why this is the answer.**
+- The recipe:
+  1. For each prompt, sample `K` completions from the current model.
+  2. Score each with a reward model (or programmatic verifier for math/code).
+  3. Keep top-1 (or top-`k`); discard the rest.
+  4. SFT the model on the kept completions.
+  5. Optionally iterate.
+- **Why it works**: implicit policy improvement. The model's own samples form a distribution; keeping high-scoring tails biases toward better outputs without explicit RL.
+- **STaR** (Self-Taught Reasoner, Zelikman et al. 2022): rejection-sample reasoning chains; keep ones that produce the correct answer; fine-tune.
+- **Llama 2 (Touvron et al. 2023)**: explicitly used rejection sampling alongside RLHF.
+- **RAFT** (Dong et al. 2023): "Reward rAnked FineTuning" — the broader name.
+- **Tradeoffs**:
+  - Cheaper than RLHF (no PPO loop).
+  - No KL penalty by default — model can drift; combine with reference policy.
+  - Quality ceiling = reward model's ceiling.
+- **In modern stacks**: often the bootstrap step. SFT → rejection sampling → DPO/PPO is a common pipeline.
+
+**Common follow-ups.**
+- "Why not just SFT on the original data?" → Original data may not be high-quality enough; RSFT lets the model improve on its own distribution.
+- "How does this compare to GRPO?" → GRPO is RL; RSFT is supervised. GRPO has on-policy gradient updates; RSFT just keeps high-reward samples.
+
+**Common mistakes.**
+- Calling RSFT "reinforcement learning" — it's supervised on filtered samples.
+- Forgetting the diversity loss (sampling only top-1 collapses variance).
+
+**References.**
+- [Zelikman et al. — "STaR"](https://arxiv.org/abs/2203.14465).
+- [Touvron et al. — "Llama 2"](https://arxiv.org/abs/2307.09288) — RSFT in production.
+- [Dong et al. — "RAFT"](https://arxiv.org/abs/2304.06767).
+
+---
+
+### Q: How do you fine-tune a model for tool use specifically?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tool-use, function-calling, fine-tuning]
+
+**Short answer.** Curate a dataset of `(prompt, tool-call-trajectory)` examples covering: correct tool selection, correct argument format, parallel tool calls, error recovery, and "don't call a tool when not needed." Format calls with the model's expected schema (Anthropic / OpenAI's JSON tool-call format, or a custom `<tool_call>...` template). Train with SFT first; then preference optimize on `(correct_call, wrong_call)` pairs. Critical: include negative examples — when *not* to call a tool.
+
+**Expansion / why this is the answer.**
+- **Data shape**:
+  - Positive: prompt + reasoning + correct tool call + observation + final answer.
+  - Negative: tools the model shouldn't have called (over-eager tool use).
+  - Recovery: tool errored, model adapts and tries a different tool.
+  - Multi-turn: tool call → response → user follow-up → second tool call.
+- **Format**: model-specific. The canonical 2024+ shape:
+  - System prompt declares available tools (JSON schema).
+  - Model emits structured `<tool_call>{"name": ..., "arguments": {...}}</tool_call>`.
+  - Tool result returned as `<tool_result>...</tool_result>`.
+  - Model continues from there.
+- **Common failure modes to train against**:
+  - Hallucinated tool name.
+  - Wrong argument types.
+  - Calling tools when the answer is already known.
+  - Not calling tools when needed.
+  - Parallel tool calls dropping into sequential dependence.
+- **Eval**:
+  - Tool-call accuracy (right tool, right args).
+  - Task completion on agent benchmarks (TAU-bench, SWE-bench Verified).
+- **Toolformer** (Schick et al. 2023): self-supervised tool-use training — the model proposes API calls in text; if calling improves prediction, keep that example.
+- **Modern frontier models** (Claude, GPT-4o, Gemini) are tool-use-trained at the pretraining/post-training scale; OSS models often need an explicit tool-use fine-tune to be reliable.
+
+**Common follow-ups.**
+- "How do you handle a brand-new tool the model hasn't seen?" → Schema description in the prompt is enough for in-context learning; quality depends on the base model's instruction-following.
+- "What's parallel tool-call training data look like?" → Examples where two independent tool calls are emitted in one turn; the model must learn this is a valid format.
+
+**Common mistakes.**
+- Training only on positive examples — model becomes over-eager.
+- Forgetting the schema format the API expects.
+
+**References.**
+- [Schick et al. — "Toolformer"](https://arxiv.org/abs/2302.04761) — self-supervised tool-use.
+- [Anthropic — Tool use docs](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview) — primary docs.
+- [Qin et al. — "ToolLLM"](https://arxiv.org/abs/2307.16789) — large-scale tool-use SFT.
+
+---
+
+### Q: Continued pretraining vs. instruction tuning vs. RAG — when do you reach for each?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [continued-pretraining, fine-tuning, rag, knowledge-injection]
+
+**Short answer.** **Continued pretraining**: add domain *knowledge* by training next-token prediction on domain text. Expensive; needs lots of clean domain data. **Instruction tuning (SFT)**: change *behavior / format* — instruct the model to follow a new pattern. Cheap; tens of thousands of examples is plenty. **RAG**: inject knowledge at inference, no training needed. Order in practice: try RAG first (no training), instruction-tune if behavior needs changing, continued-pretrain only if domain language is so divergent that retrieval + prompt isn't enough.
+
+**Expansion / why this is the answer.**
+- **Continued pretraining**:
+  - Same loss as pretraining (next-token); new corpus.
+  - Useful for code-specialized (CodeLlama from Llama), medical (PMC-Llama), legal.
+  - Risks catastrophic forgetting of general capability if mix isn't right.
+  - Cost: substantial GPU-time.
+- **Instruction tuning / SFT**:
+  - Format the model already uses; teach new behaviors (tone, structure, refusals).
+  - Doesn't add fundamental knowledge.
+  - 1k–100k examples typical.
+- **RAG**:
+  - Add knowledge dynamically; auditable; updatable.
+  - Doesn't change behavior — model still tone/format defaults.
+  - Latency cost at inference.
+- **Decision frame**:
+  - "Wrong tone / format" → SFT.
+  - "Knowledge changes frequently" → RAG.
+  - "Domain language so divergent the model doesn't tokenize it well, or so specialized base model lacks vocabulary for it" → continued pretraining.
+  - "All of the above" → continued pretraining + SFT + RAG (full stack, expensive).
+- **Empirical findings** (Ovadia et al. 2023, Soudani et al. 2024): RAG injects knowledge more effectively than fine-tuning per unit of compute; fine-tuning shapes behavior better than RAG. They complement.
+
+**Common follow-ups.**
+- "What if you have a niche acronym the model never saw?" → RAG plus a small SFT with a glossary; continued pretraining only if the niche is large and ongoing.
+- "When is continued pretraining catastrophic?" → If the new corpus is narrow; mix general data in (5–20%) to retain capability.
+
+**Common mistakes.**
+- Defaulting to fine-tuning when RAG would work.
+- Continued pretraining on a single domain without replay (loses general capability).
+
+**References.**
+- [Ovadia et al. — "Fine-Tuning or Retrieval?"](https://arxiv.org/abs/2312.05934).
+- [Roziere et al. — "Code Llama"](https://arxiv.org/abs/2308.12950) — continued pretraining for code.
+
+---
+
+### Q: What is process supervision (PRM), and how does it improve reasoning?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [process-reward-model, prm, reasoning, lightman]
+
+**Short answer.** A Process Reward Model (PRM) scores each *intermediate step* of a reasoning trace, not just the final answer. Compared to an Outcome Reward Model (ORM, which scores only the final answer), PRM gives finer credit assignment — "the second step is wrong; back up" — and is more sample-efficient at training and at search. Lightman et al. (2023) showed PRM outperforms ORM on MATH; used in modern reasoning-trained LLMs (o1-style, DeepSeek-R1 lineage).
+
+**Expansion / why this is the answer.**
+- **ORM**: binary or scalar score on `(prompt, full solution)`. Simple to label (was the final answer right?). Coarse credit assignment.
+- **PRM**: scalar score per step in `(prompt, step_1, step_2, ..., step_k, answer)`. Each step labeled correct/incorrect.
+- **Training labels**:
+  - PRM800K (Lightman et al. 2023): 800k human-labeled step-level correctness annotations on MATH.
+  - Cost-efficient alternatives: Math-Shepherd (Wang et al. 2024) — auto-label using rollouts (a step is "correct" if completing from it has high success rate).
+- **Inference-time use**:
+  - **Verify-and-pick (best-of-N)**: sample N reasoning traces; pick the one with highest PRM score.
+  - **Search-guided generation**: use PRM to prune bad branches in tree search.
+- **RL use**: PRM as a dense reward signal; gives step-level credit (vs. sparse final-answer reward in ORM-RL).
+- **2024–2026 context**: reasoning-RL pipelines (DeepSeek-R1's predecessor papers, OpenAI's o1-style) lean on PRM-style supervision; GRPO often uses programmatic verifier as ORM with step-level rollouts.
+
+**Common follow-ups.**
+- "Why is PRM more sample-efficient than ORM?" → Each step is a training example; the trajectory provides ~K labels instead of 1.
+- "Why is process supervision hard to scale?" → Step-level labels need human annotation; automated alternatives (Math-Shepherd) introduce noise.
+
+**Common mistakes.**
+- Conflating PRM with PPO's value function (different concept — PRM scores correctness of steps, value function predicts cumulative reward).
+
+**References.**
+- [Lightman et al. — "Let's Verify Step by Step"](https://arxiv.org/abs/2305.20050) — PRM canonical paper.
+- [Wang et al. — "Math-Shepherd"](https://arxiv.org/abs/2312.08935) — automated PRM labeling.
+
+---
+
+### Q: Multi-task vs single-task fine-tuning — what does the empirical evidence show?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [multi-task, fine-tuning, generalization]
+
+**Short answer.** Multi-task instruction tuning (FLAN, T0, Self-Instruct) generalizes better to *unseen* tasks than single-task fine-tuning, especially at larger model scale. For a *specific* target task with abundant data, single-task fine-tuning gives the best in-domain performance but worse generalization. Modern post-training stacks favor diverse multi-task SFT specifically because the deployed model must handle many tasks.
+
+**Expansion / why this is the answer.**
+- **Single-task fine-tuning**:
+  - Best on the target task.
+  - Risk of catastrophic forgetting on other tasks.
+  - Smaller, narrower training data.
+- **Multi-task / instruction tuning**:
+  - Trains on many task formats with a shared instruction template.
+  - Generalizes to *held-out* task formulations (FLAN's headline result).
+  - In-domain performance is sometimes slightly lower than dedicated single-task.
+- **FLAN** (Wei et al. 2021): instruction-tune T5 on 60+ NLP tasks formatted as instructions; strong zero-shot to unseen tasks.
+- **T0** (Sanh et al. 2021): same idea, different prompt templates per task.
+- **Modern instruction tuning datasets**: OpenOrca, FLAN-v2, Tulu-3 mix.
+- **Mixture ratios matter**: too much of one task drowns out others; balance dataset diversity.
+- **When to single-task fine-tune**:
+  - You only care about one task in production (rare for LLM applications).
+  - You have ample task-specific data (tens of thousands+) and don't need generalization.
+  - You're willing to keep a separate model for that task.
+
+**Common follow-ups.**
+- "How do FLAN-style models compare to plain GPT-3?" → FLAN-T5 substantially outperforms vanilla T5 on zero-shot tasks; same compute budget, different objective.
+- "When does multi-task hurt?" → If one task has a very narrow distribution that drowns out diverse data, or if the tasks conflict (one task's "correct" is another's "wrong").
+
+**Common mistakes.**
+- Reporting in-domain wins from single-task fine-tuning while ignoring catastrophic forgetting.
+- Calling FLAN "the FLAN model" — it's an instruction-tuning *recipe* applied to T5 / PaLM / others.
+
+**References.**
+- [Wei et al. — "FLAN"](https://arxiv.org/abs/2109.01652).
+- [Sanh et al. — "T0"](https://arxiv.org/abs/2110.08207).
+- [Chung et al. — "FLAN-T5"](https://arxiv.org/abs/2210.11416) — large-scale FLAN.
+
+---
+
+### Q: What's the difference between off-policy and on-policy RL in the LLM context?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [off-policy, on-policy, rl, ppo, dpo]
+
+**Short answer.** **On-policy**: the training data comes from the *current* policy. PPO (used in RLHF) is on-policy — must continually generate samples from the policy being optimized. **Off-policy**: training data comes from a *different* policy. DPO is off-policy — operates on a fixed preference dataset (`(prompt, chosen, rejected)`) collected from an arbitrary policy. Off-policy is much cheaper (no sampling loop); on-policy is more responsive to fine-grained shaping. The 2023–2026 trend was strongly toward off-policy (DPO, KTO) due to its simplicity.
+
+**Expansion / why this is the answer.**
+- **PPO-RLHF** (on-policy):
+  - Each training step: sample completions from the *current* policy, score with reward model, compute policy gradient.
+  - Reward model is fixed (trained earlier).
+  - Compute: every step needs a generation pass + reward model pass + policy update.
+- **DPO** (off-policy):
+  - Fixed dataset of `(prompt, chosen, rejected)` preference pairs.
+  - One supervised pass over the dataset.
+  - No sampling loop, no reward model.
+- **GRPO** (on-policy but simpler than PPO):
+  - Sample G completions, score with a verifier, REINFORCE-style update with within-batch normalized advantage.
+  - No value function (PPO needs one).
+- **Importance sampling** can adapt off-policy data to on-policy — but introduces variance; rarely used at LLM scale.
+- **Off-policy data sources**:
+  - Human preference annotations on completions from any model.
+  - Open-source preference datasets (UltraFeedback, HH-RLHF).
+  - Logged production traffic.
+- **Tradeoffs**:
+  - **Off-policy**: cheap; can use data from other models; less responsive to current policy state.
+  - **On-policy**: expensive; data always matches current state; more responsive to fine-grained shaping.
+- **Empirical consequence**: PPO still leads on safety-critical behavior shaping (subtle, fine-grained). DPO leads on cost-and-quality for the bulk of post-training.
+
+**Common follow-ups.**
+- "Why is DPO called off-policy if the loss involves the current policy's log-probs?" → The *data* is off-policy; the *gradient* involves the current policy. The distinction is about where the samples came from.
+- "What's RLOO?" → REINFORCE-leave-one-out; on-policy; cheaper than PPO because no value head. Used in some labs.
+
+**Common mistakes.**
+- Calling DPO "RL" — it's a supervised loss derived from an RL objective.
+- Thinking off-policy is always worse; on the contrary, it's the modal modern choice.
+
+**References.**
+- [Rafailov et al. — "DPO"](https://arxiv.org/abs/2305.18290).
+- [Ouyang et al. — "InstructGPT"](https://arxiv.org/abs/2203.02155) — on-policy PPO RLHF.
+- [Shao et al. — "GRPO / DeepSeekMath"](https://arxiv.org/abs/2402.03300).
+
+---

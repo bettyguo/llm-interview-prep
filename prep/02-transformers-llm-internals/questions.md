@@ -565,3 +565,303 @@ The most-asked topic in 2026 AI interview loops. Entries follow the [Q&A schema]
 - [Wang et al. — "Interpretability in the Wild"](https://arxiv.org/abs/2211.00593) — IOI circuit.
 
 ---
+
+### Q: Compare state-space models (Mamba) to transformers. What's the case for SSMs, and where do they still lag?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [mamba, ssm, alternatives, long-context]
+
+**Short answer.** State-space models (Mamba, Mamba-2) maintain a recurrent hidden state that processes tokens sequentially with O(n) compute and constant-per-token memory at inference — vs. transformer's O(n²) attention. The selective-scan trick in Mamba (Gu & Dao 2023) makes the state input-dependent, recovering content-addressable behavior that earlier SSMs lacked. SSMs are competitive on language modeling at smaller scale and on synthetic long-range tasks, but transformers still dominate at frontier scale; hybrid SSM-attention models (Jamba, Zamba, RecurrentGemma) are an active middle ground in 2025–2026.
+
+**Expansion / why this is the answer.**
+- **Why care**: transformer attention is O(n²) in seq length; SSMs are O(n). For very long context, this is a fundamentally better complexity class.
+- **SSM basics**: an SSM has the form `h_t = A h_{t-1} + B x_t; y_t = C h_t`. With structure on `A` (HiPPO, Gu et al. 2020), it can capture long dependencies.
+- **S4, S5, H3**: precursors; structured matrices for efficient computation.
+- **Mamba** (Gu & Dao 2023):
+  - Makes `B, C, Δt` input-dependent ("selective" SSM).
+  - Selective scan computed with a custom hardware-aware kernel.
+  - Matches transformers on LM perplexity at small-to-medium scale; sometimes exceeds on long-range tasks.
+- **Mamba-2** (Dao & Gu 2024): reframes selective SSM as a matrix product, allowing parallel-friendly computation; competitive at billion-parameter scale.
+- **Where SSMs lag**:
+  - Frontier-scale language modeling (>30B): transformers remain the empirical winner.
+  - In-context learning behavior is different (no induction heads in the standard form).
+  - Tool / structured / code tasks: transformers' attention pattern remains the standard.
+- **Hybrid models** (the modal 2025 design choice for long context):
+  - **Jamba** (AI21, 2024): mix Mamba and attention layers (1:7 ratio).
+  - **RecurrentGemma** (Google, 2024): Griffin-style recurrence + local attention.
+  - **Zamba** (2024): SSM blocks with a shared attention every few layers.
+- **What an interviewer wants you to know**: that SSMs exist, that the complexity-class argument is real but the quality gap at scale is also real, and that hybrid designs are the active frontier.
+
+**Common follow-ups.**
+- "Why no in-context-learning equivalent of induction heads in Mamba?" → Selective-scan can mimic some, but the attention-driven mechanism is different; an active research area.
+- "Inference benefit?" → No KV cache; constant memory per layer regardless of context length.
+
+**Common mistakes.**
+- Saying "SSMs have replaced transformers" — they have not at scale.
+- Calling Mamba "RNN-like" — it is recurrent, but the selective-scan kernel gives it transformer-like training parallelism.
+
+**References.**
+- [Gu & Dao — "Mamba"](https://arxiv.org/abs/2312.00752) — Mamba.
+- [Dao & Gu — "Transformers are SSMs" (Mamba-2)](https://arxiv.org/abs/2405.21060) — Mamba-2.
+- [Lieber et al. — "Jamba"](https://arxiv.org/abs/2403.19887) — hybrid model.
+- [De et al. — "Griffin/RecurrentGemma"](https://arxiv.org/abs/2402.19427) — Griffin recurrence.
+
+---
+
+### Q: How do multimodal LLMs (LLaVA, Flamingo, GPT-4V) align vision with language?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [multimodal, llava, vision-language, clip]
+
+**Short answer.** Encode the image with a vision encoder (typically a ViT, often CLIP-pretrained); project the visual features into the LLM's token-embedding space with a small adapter (linear projection or MLP for LLaVA; Q-Former for BLIP-2; cross-attention layers for Flamingo); concatenate or interleave the resulting "image tokens" with text tokens in the LLM's input. Train end-to-end (or with the LLM frozen and only the projection trained, then unfreeze). The visual representation lives in the LLM's representational space alongside language.
+
+**Expansion / why this is the answer.**
+- **Components**:
+  1. **Vision encoder**: produces image patch embeddings. ViT-Large, often initialized from CLIP (CLIP-ViT-L/14 is the canonical choice).
+  2. **Projection / adapter**: maps the visual features into the LLM's embedding dim. Variants:
+     - **Linear / MLP projector** (LLaVA, LLaVA-1.5/1.6): cheap; reuses every visual token; common in 2024.
+     - **Q-Former** (BLIP-2, MiniGPT-4): a small transformer that queries the visual features and outputs a fixed number of tokens.
+     - **Perceiver Resampler** (Flamingo): cross-attention down-sample.
+  3. **LLM backbone**: any decoder-only LLM (LLaMA, Mistral, Vicuna in OSS; closed for GPT-4V, Gemini).
+- **Training stages**:
+  1. **Alignment / projector-only pretraining**: freeze the LLM and the vision encoder; train just the projector on `(image, caption)` data. Cheap.
+  2. **Instruction tuning**: unfreeze the LLM (often only adapter weights via LoRA at first); fine-tune on multimodal instruction data (GPT-4-generated `(image, question, answer)` triples).
+- **Architectural choice axes**:
+  - **Late fusion** (LLaVA): visual tokens come in once at the input; the LLM processes them uniformly.
+  - **Cross-attention fusion** (Flamingo): every (or some) LLM layer cross-attends to vision; more expressive, more params.
+  - **Native multimodal** (Chameleon, Gemini, recent GPT-4o): trained from scratch on interleaved modalities; tokens for image + text share a vocabulary.
+- **Eval benchmarks**: MMMU, MathVista, MMSTAR, ChartQA, DocVQA.
+
+**Common follow-ups.**
+- "Why does CLIP-pretraining help?" → CLIP's vision encoder is already aligned with text via contrastive training; saves alignment work.
+- "What's a 'native multimodal' model?" → Trained from scratch with text and image tokens interleaved (not bolted on later) — GPT-4o, Gemini 1.5/2.x, Chameleon.
+
+**Common mistakes.**
+- Saying multimodal LLMs use the same parameters for vision and text — they don't; there's a separate vision encoder.
+- Calling LLaVA "trained from scratch" — it's a projector-trained adapter atop frozen pretrained encoders.
+
+**References.**
+- [Liu et al. — "Visual Instruction Tuning" (LLaVA)](https://arxiv.org/abs/2304.08485) — LLaVA.
+- [Alayrac et al. — "Flamingo"](https://arxiv.org/abs/2204.14198) — cross-attention fusion.
+- [Li et al. — "BLIP-2"](https://arxiv.org/abs/2301.12597) — Q-Former.
+- [Radford et al. — "CLIP"](https://arxiv.org/abs/2103.00020) — vision-language pretraining.
+- [Chameleon team — "Chameleon"](https://arxiv.org/abs/2405.09818) — native multimodal.
+
+---
+
+### Q: What's the "residual stream" in a transformer, and why is it the right abstraction for interpretability?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [residual-stream, interpretability, mech-interp]
+
+**Short answer.** Each layer in a pre-norm transformer reads from and writes to a single shared **residual stream** of vectors `x_l`. The attention and FFN sub-layers each compute an update they add to the stream — they don't transform the stream in place. This makes the residual stream a "communication channel" through depth: each layer can read information any prior layer wrote. Mech-interp uses this abstraction because every intermediate computation has a stable basis (the residual stream's dimensions), and contributions decompose cleanly across layers and heads.
+
+**Expansion / why this is the answer.**
+- The structure of a pre-norm block:
+  - `x_{l+1} = x_l + Attn(LN(x_l)) + FFN(LN(x_l + Attn(LN(x_l))))`
+- All updates are *added* to the residual stream; the stream is the persistent state.
+- **Reading vs. writing**:
+  - Each attention head's **query** "reads" along its `W_Q` direction; its **value/output projection** writes along `W_OV`.
+  - Each FFN reads along `W_in`; writes via `W_out`.
+- This means an attention head from layer 3 can "read" something that an FFN at layer 1 "wrote" into the stream — long-range dependencies through depth.
+- **Why this matters for mech-interp**:
+  - Each head/FFN is a "circuit element"; the stream is the wire.
+  - Contributions decompose linearly across heads and layers (in pre-norm).
+  - You can ablate one head and see its effect on the downstream stream.
+  - Anthropic's "Transformer Circuits" thread (Elhage et al. 2021) formalizes this view.
+- **What this is NOT**: a description of activations as "concepts." It's a description of the architecture's data flow.
+- **Implication for interpretability research**:
+  - Linear-probe experiments target specific residual-stream directions.
+  - Activation patching = swap residual-stream activations between two prompts and see what changes.
+  - Sparse autoencoders try to find "feature directions" in the residual stream that correspond to interpretable concepts.
+
+**Common follow-ups.**
+- "Why does post-norm not have this clean structure?" → Post-norm applies LN *after* the residual add, breaking the linear decomposition.
+- "What's a sparse autoencoder doing on the residual stream?" → Decomposing residual activations into a sparse dictionary of features, hoping each feature corresponds to a human-interpretable concept (Cunningham et al. 2023; Templeton et al. 2024).
+
+**Common mistakes.**
+- Confusing the residual stream with the input embedding (it evolves through layers).
+- Calling it a "skip connection" without acknowledging the layer-by-layer accumulation.
+
+**References.**
+- [Elhage et al. — "A Mathematical Framework for Transformer Circuits"](https://transformer-circuits.pub/2021/framework/index.html) — the residual stream formalism.
+- [Templeton et al. — "Scaling Monosemanticity"](https://transformer-circuits.pub/2024/scaling-monosemanticity/) — sparse autoencoders on the residual stream.
+
+---
+
+### Q: What is multi-token prediction (MTP), and how does DeepSeek-V3 use it?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [mtp, multi-token-prediction, deepseek, training-objective]
+
+**Short answer.** Multi-token prediction (MTP) adds auxiliary heads that predict the next 2, 3, ... tokens in parallel from the same hidden state — a denser learning signal per training step than vanilla next-token-only. DeepSeek-V3 uses MTP with sequential prediction modules during training to improve data efficiency (and speculative-decoding compatibility); only the main next-token head is used at inference unless speculative decoding is enabled.
+
+**Expansion / why this is the answer.**
+- **Standard objective**: predict `x_{t+1}` from `x_{≤t}`. One token of signal per position.
+- **MTP** (Gloeckle et al. 2024, Meta; refined in DeepSeek-V3 2024):
+  - Additional heads (or full transformer modules in DeepSeek-V3) predict `x_{t+2}`, `x_{t+3}`, ... from the same backbone state.
+  - Auxiliary losses train these heads.
+  - More training signal per token; faster convergence, better data efficiency.
+- **DeepSeek-V3 specifics**:
+  - Each MTP module is a small transformer that takes the main model's hidden state plus the next ground-truth token (chained) and predicts the token after.
+  - Trained jointly with the main next-token loss, weighted.
+  - At inference: the main head produces tokens; the MTP heads serve as **speculative-decoding draft heads** — the model is its own draft model.
+- **Why this helps**:
+  - Dense signal: every position teaches several positions of "what comes after."
+  - At inference: speculative decoding speeds up tokens-per-second roughly proportional to the average acceptance rate of MTP heads.
+- **What it does not do**: change the inference contract — the model still emits one token at a time unless spec-decoding is used.
+
+**Common follow-ups.**
+- "Why is MTP a better training objective than just longer context?" → MTP forces the model to maintain multi-step coherence in a single hidden state, not just temporally adjacent.
+- "Connection to Medusa?" → Medusa (Cai et al. 2024) adds prediction heads at *inference time* to an already-trained model; MTP integrates them during training.
+
+**Common mistakes.**
+- Calling MTP "predicting all tokens at once" — it's still autoregressive at inference; the multi-token signal is a training trick.
+
+**References.**
+- [Gloeckle et al. — "Better & Faster Large Language Models via Multi-token Prediction"](https://arxiv.org/abs/2404.19737) — Meta MTP paper.
+- [DeepSeek-AI — "DeepSeek-V3 Technical Report"](https://arxiv.org/abs/2412.19437) — production use of MTP.
+
+---
+
+### Q: Why does tokenization matter so much for chain-of-thought arithmetic?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [tokenization, arithmetic, chain-of-thought]
+
+**Short answer.** Most LLM tokenizers split multi-digit numbers inconsistently — "1234" might be one token, two tokens, or split differently from "1235." The model has to learn arithmetic separately for each tokenization pattern, fragmenting the signal. Chain-of-thought helps because it makes the model emit one digit at a time, recovering position-by-position computation; modern LLMs (LLaMA 3, Claude, GPT-4o) add tokenizer-level rules (e.g. always split numbers digit-by-digit) for the same reason.
+
+**Expansion / why this is the answer.**
+- The problem: BPE tokenizers learn merges based on frequency in training data. Common numbers ("100", "2024", "iPhone 15") get their own tokens; uncommon ones don't.
+- Consequence: for arithmetic, "256 + 257" might tokenize as `[256][ + ][257]` (good) or `[2][56][ + ][2][57]` (bad, fragmented), depending on the specific tokenizer.
+- Models trained on the bad tokenization must learn arithmetic separately for each fragmentation; they're worse at it than humans expect.
+- **Chain-of-thought helps** because:
+  - Forces the model to emit intermediate steps, breaking the number into manageable pieces.
+  - The carry/borrow operation is exposed and can be computed digit-by-digit.
+- **Tokenizer-level fixes**:
+  - **Digit-by-digit tokenization**: LLaMA 3 introduced a rule splitting all sequences of digits into individual digit tokens. Improves arithmetic noticeably.
+  - **Right-to-left tokenization** for numbers: ensures consistent fragmentation of long numbers from the least-significant digit.
+- **Empirical results**: Singh & Strouse 2024 ("Tokenization counts: the impact of tokenization on arithmetic in frontier LLMs") quantifies the effect.
+
+**Common follow-ups.**
+- "Why don't we tokenize everything character-level then?" → Sequence length explodes; attention is quadratic; inefficient at scale.
+- "What's the right tokenizer for code?" → Code-specialized BPE that handles symbols/operators as separate tokens; reduces fragmentation.
+
+**Common mistakes.**
+- Blaming "the model" for arithmetic errors when tokenization is the underlying cause.
+- Assuming all tokenizers are equivalent; they aren't.
+
+**References.**
+- [Singh & Strouse — "Tokenization counts: the impact of tokenization on arithmetic in frontier LLMs"](https://arxiv.org/abs/2402.14903) — empirical study.
+- [OpenAI tiktoken](https://github.com/openai/tiktoken) — the GPT tokenizer family.
+
+---
+
+### Q: What's the difference between weight tying and weight sharing? When is each used?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [weight-tying, weight-sharing, embedding]
+
+**Short answer.** **Weight tying** in transformers usually means sharing the parameters of the input token embedding table with the output (LM head) projection — `W_out = W_emb` (transposed). Saves parameters and empirically improves perplexity (Press & Wolf 2017). **Weight sharing** more broadly means any reuse of parameters across positions or layers — e.g. ALBERT shares parameters across transformer layers, dramatically shrinking the model. Modern decoder-only LLMs use input/output tying; few use cross-layer sharing because the depth-specific computation is too valuable.
+
+**Expansion / why this is the answer.**
+- **Embedding tying**:
+  - Logic: the embedding matrix `W_emb ∈ ℝ^{V × d}` maps tokens to vectors; the LM head `W_out ∈ ℝ^{d × V}` maps the final hidden state to logits over the vocabulary.
+  - Tied: `W_out = W_embᵀ`. Saves `V × d` parameters (substantial for large vocab).
+  - Empirically improves perplexity slightly (Press & Wolf 2017, "Using the Output Embedding to Improve Language Models").
+  - Most modern LLMs use this: GPT-2/3, LLaMA family, Mistral, etc.
+- **Cross-layer parameter sharing** (ALBERT, Lan et al. 2019):
+  - Same parameters used in every transformer block.
+  - Drastically reduces parameter count; surprisingly competitive on benchmarks for ALBERT-size models.
+  - Not used at frontier scale because the parameter budget is well-spent on per-layer specialization.
+- **Other forms**:
+  - **Multi-Query Attention**: shares K and V across heads (a form of attention-axis sharing).
+  - **Tied positional encodings**: not really used; positional encodings are typically separate.
+
+**Common follow-ups.**
+- "Why does tying help perplexity?" → Empirically; intuition: the embedding learned for "the" should be the same vector the output projection expects when predicting "the." Tying enforces this constraint.
+- "Cost?" → A single constraint; almost free.
+
+**Common mistakes.**
+- Conflating embedding tying (input-output) with attention parameter sharing.
+- Assuming ALBERT-style sharing is always good — it's a quality tradeoff.
+
+**References.**
+- [Press & Wolf — "Using the Output Embedding to Improve Language Models"](https://arxiv.org/abs/1608.05859) — embedding tying.
+- [Lan et al. — "ALBERT"](https://arxiv.org/abs/1909.11942) — cross-layer sharing.
+
+---
+
+### Q: What is grouped-query MoE (combining MoE with GQA)? Why does it matter for serving?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [moe, gqa, hybrid, serving]
+
+**Short answer.** Modern frontier-scale MoE models (DeepSeek-V3, Qwen-MoE, Mixtral) combine **MoE** in the FFN sublayer with **GQA** or **MLA** in the attention sublayer. MoE cuts active FFN compute (only top-k experts fire); GQA cuts KV-cache memory and bandwidth. The combination yields a model with large total parameters and small active compute *and* small KV cache — the right shape for cost-effective LLM serving at scale.
+
+**Expansion / why this is the answer.**
+- **MoE benefit**: total params can be 10×+ the active params; capacity grows without per-token compute growing.
+- **GQA benefit**: KV cache shrinks; decode bandwidth drops; throughput rises.
+- **Combined**:
+  - Mixtral 8x7B: GQA-8 attention + MoE-8 FFN (k=2). 47B total params, ~13B active.
+  - DeepSeek-V3: MLA attention (further cache reduction than GQA) + 256 routed experts + 1 shared expert (k=8 routed + 1 shared). 671B total params, ~37B active.
+- **Why this is the right shape for serving**:
+  - Decode is memory-bandwidth-bound.
+  - MoE keeps active compute small.
+  - GQA/MLA keeps KV-cache memory small.
+  - Result: serve a 100B+ model at a per-token cost not far from a 30B dense model.
+- **What this costs at training time**:
+  - More total parameters → more communication for distributed training.
+  - MoE adds expert-parallel communication and load-balancing complexity.
+  - GQA reduces attention compute slightly compared to MHA.
+- **What an interviewer wants you to know**: the architecture choices are tightly tied to serving economics; MoE alone or GQA alone is partial; the combination is what makes 600B-class models economically deployable.
+
+**Common follow-ups.**
+- "Why doesn't every MoE use GQA?" → Mostly does in 2024+; older designs (Switch Transformer) predate the GQA shift.
+- "What about MLA?" → MLA goes further than GQA in cache reduction; used in DeepSeek-V2/V3.
+
+**Common mistakes.**
+- Treating MoE and GQA as alternatives — they address different axes (FFN compute vs. attention memory).
+
+**References.**
+- [Jiang et al. — "Mixtral of Experts"](https://arxiv.org/abs/2401.04088) — GQA + MoE.
+- [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437) — MLA + fine-grained MoE.
+- [Ainslie et al. — "GQA"](https://arxiv.org/abs/2305.13245) — GQA.
+
+---
+
+### Q: What is the "softmax-bottleneck" problem, and is it still a concern?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [softmax-bottleneck, lm-head, expressiveness]
+
+**Short answer.** Yang et al. (2017) argued that the final softmax LM head bottlenecks expressiveness: the output distribution lives in a low-rank space determined by the embedding × LM-head matrix, while true natural-language conditional distributions are high-rank. Their proposed fix (Mixture of Softmaxes, MoS) gave modest gains on small LMs. At modern LLM scale, the bottleneck is rarely the binding constraint — capacity is abundant — and MoS is not standard. Knowing about it signals familiarity with classical LM theory.
+
+**Expansion / why this is the answer.**
+- The argument:
+  - Softmax LM head: `P(x_t | x_<t) = softmax(W h_t)` where `h_t ∈ ℝ^d, W ∈ ℝ^{V × d}`.
+  - The matrix of log-probabilities over all contexts × vocabulary has rank ≤ `d`.
+  - Yang et al. argue real-language distributions have effective rank > `d`.
+- **Mixture of Softmaxes (MoS)**: model `P = Σ π_k softmax(W h_t^{(k)})` for several heads; effective rank can exceed `d`.
+- **Counter-argument** (Kasai et al. 2020 and the broader scaling argument): at sufficient model size, `d` is large enough that the bottleneck isn't the binding constraint; LM performance keeps improving with width.
+- **Modern stance**: not used in production LLMs. The argument is academically interesting; the practical fix is "make the model bigger."
+
+**Common follow-ups.**
+- "Has anyone revisited this at LLM scale?" → A handful of papers; no clear positive result motivating MoS for production.
+- "What is rank in this context?" → Effective rank of the (context × vocab) log-probability matrix.
+
+**Common mistakes.**
+- Citing MoS as "modern best practice" — it isn't.
+
+**References.**
+- [Yang et al. — "Breaking the Softmax Bottleneck"](https://arxiv.org/abs/1711.03953) — the canonical paper.
+
+---

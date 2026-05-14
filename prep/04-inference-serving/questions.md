@@ -586,3 +586,239 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [vLLM project (multi-LoRA support)](https://github.com/vllm-project/vllm) — primary repo.
 
 ---
+
+### Q: What is disaggregated / phase-split serving (Splitwise, Mooncake)? When is it the right move?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [disaggregated-serving, splitwise, prefill-decode]
+
+**Short answer.** Disaggregated serving runs prefill and decode on *different* pools of GPUs, transferring the KV cache between them. Justified because prefill is compute-bound (wants different hardware tuning) while decode is memory-bandwidth-bound. Splitwise (Microsoft, 2023) and Mooncake (Moonshot AI, 2024) showed substantial throughput gains at high load. Worth it when (a) traffic is high and steady, (b) prefill-vs-decode resource contention is a measurable problem, and (c) the cluster is large enough that the KV-transfer cost is amortized.
+
+**Expansion / why this is the answer.**
+- The interference problem:
+  - In a *collocated* serving stack (vLLM default), prefill and decode share GPUs.
+  - A long prefill blocks decode steps → tail-latency spikes for streaming users.
+  - Chunked prefill mitigates but doesn't eliminate.
+- **Disaggregation** physically separates them:
+  - **Prefill pool**: GPUs optimized for compute throughput; process incoming prompts; emit KV cache.
+  - **Decode pool**: GPUs optimized for memory bandwidth; receive KV cache; generate tokens.
+  - **KV transfer**: copy the cache between pools — typically over high-speed interconnect (NVLink, InfiniBand).
+- **Splitwise** (Patel et al. 2023): proposed and benchmarked the design; gains depend on the prefill-vs-decode ratio in workloads.
+- **Mooncake** (Qin et al. 2024, Moonshot AI): production-scale disaggregated serving with KV-cache pool and chunked transfer; cited 75% lower cost at high load.
+- **When NOT to disaggregate**:
+  - Low traffic — overhead dominates.
+  - Single-node deployments — pool separation is meaningless.
+  - Workloads with mostly-short prompts and long generations (decode dominates anyway).
+- **What's required**:
+  - KV-cache serialization across nodes.
+  - A scheduler aware of both pools.
+  - Fast interconnect.
+
+**Common follow-ups.**
+- "Is the KV cache transfer cheap?" → Not free — it's MB-to-GB per request. The win requires the transfer to be much smaller than the alternative cost.
+- "Does vLLM disaggregate?" → Standard vLLM is collocated; disaggregation experiments exist in research forks.
+
+**Common mistakes.**
+- Calling chunked prefill the same as disaggregation — chunked prefill stays in one pool.
+- Assuming disaggregation always wins — at low load it's overhead.
+
+**References.**
+- [Patel et al. — "Splitwise: Efficient Generative LLM Inference Using Phase Splitting"](https://arxiv.org/abs/2311.18677).
+- [Qin et al. — "Mooncake"](https://arxiv.org/abs/2407.00079).
+
+---
+
+### Q: How does model cascading / routing reduce inference cost?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [cascade, routing, cost-optimization]
+
+**Short answer.** Send the easy fraction of queries to a cheap small model; escalate hard queries to an expensive large model. A small "router" (rules, classifier, or another LLM) decides which path. Done well, 70%+ of queries answered by the cheap model at 10× lower cost; only the residual hard set hits the expensive model. RouteLLM (Ong et al. 2024) showed up to 85% cost cut at near-frontier quality. The risk is router miscalibration — too aggressive routing degrades quality.
+
+**Expansion / why this is the answer.**
+- **The setup**:
+  - Pool: one cheap model (e.g. Haiku, GPT-4o-mini, Llama-3.1-8B) + one expensive model (Sonnet/Opus, GPT-5, Llama-3.1-405B).
+  - Router decides per query.
+- **Router options**:
+  - **Rules**: regex / heuristic based on prompt features (length, has-math, has-code, structured).
+  - **Trained classifier**: a small model trained on `(query, which_model_won)` pairs.
+  - **LLM-judge router**: a cheap LLM is asked "would the small model handle this well?" — itself a small-model decision.
+  - **Self-confidence routing**: small model attempts; if its confidence is low (entropy, log-prob threshold), escalate.
+- **Optimization metric**: cost subject to quality SLA (or quality subject to cost budget).
+- **Empirical**:
+  - RouteLLM (Ong et al. 2024) showed routers can recover 85% of frontier-model quality at 25–50% of cost.
+  - Common production use case: route by query length, structure, or detected language.
+- **Risks**:
+  - Router error: a hard query routed to the small model → bad answer → user pain.
+  - Stale router: the underlying models change; routing decisions drift.
+
+**Common follow-ups.**
+- "How do you train a router?" → Need a labeled dataset where each query was scored by both models. Either use logged production traffic or hand-grade a sample.
+- "What's the right metric to optimize?" → Some combination of cost and downstream quality; depends on the deployment SLA.
+
+**Common mistakes.**
+- Routing only on cheap-to-compute features (length); misses semantic difficulty.
+- Static rules in a fast-moving model landscape.
+
+**References.**
+- [Ong et al. — "RouteLLM"](https://arxiv.org/abs/2406.18665).
+- [Chen et al. — "FrugalGPT"](https://arxiv.org/abs/2305.05176) — early cascading work.
+
+---
+
+### Q: Walk through GPU memory math for serving a 405B model.
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [memory, large-models, tensor-parallel]
+
+**Short answer.** Weights for Llama-3.1-405B in bf16 are ~810 GB. Doesn't fit on a single 80GB H100 — need tensor-parallel across at least 12 GPUs (1.5 nodes), realistically 16 (2 H100 nodes). Add KV cache: with GQA-8 and 16k context, ~70 MB per request × concurrent requests. INT4 quantization cuts weights to ~200 GB, fits in one H100 80GB node with 8 GPUs and TP=8. FP8 inference on H100 doubles throughput further.
+
+**Expansion / why this is the answer.**
+- **Weight memory**:
+  - 405B params × 2 bytes (bf16) = 810 GB.
+  - 405B × 1 byte (FP8) = 405 GB.
+  - 405B × 0.5 bytes (INT4) = ~200 GB (with metadata).
+- **Per-GPU footprint** depends on parallelism:
+  - 8× H100 (80GB) = 640 GB total. bf16 doesn't fit; FP8 just barely; INT4 fits with headroom.
+  - 16× H100 (1.28 TB) = bf16 fits with TP=16.
+- **Activation + KV cache budget** (per GPU after weights):
+  - At 8× H100 / INT4 weights: ~80 GB - 25 GB weights/GPU = ~55 GB free.
+  - KV cache per token (Llama 3.1 405B, GQA-8, n_layers=126, d_head=128, bf16 = 2): `2·126·8·128·2 = 516 KB/token`. With TP=8 sharding KV → ~65 KB/token-per-GPU.
+  - 55 GB / 65 KB ≈ ~850k tokens-of-context across all batched requests, per GPU.
+  - In practice 32 concurrent requests × 16k context = 512k tokens — fits.
+- **Throughput** (rough):
+  - INT4 + FP8 + spec-decoding on 8× H100: ~30–50 output tokens/sec per request at batch 32 (workload-dependent).
+- **Comparison**:
+  - 70B fits on 1 GPU at INT4; 405B does not — that's a meaningful operational difference.
+- **What an interviewer wants you to know**: the order-of-magnitude math; that quantization, tensor parallel, and GQA all shift the math; that real numbers come from load-test, not BoE.
+
+**Common follow-ups.**
+- "How do you scale to 1M context?" → KV cache dominates; need quantized KV (FP8/INT4), longer-context-trained weights, and likely sequence-parallel inference.
+- "What about CPU offload?" → DeepSpeed-Inference / FlexGen offload weights to CPU/disk; works but latency tanks.
+
+**Common mistakes.**
+- Forgetting activations and KV cache eat into the per-GPU budget.
+- Treating MoE total params as the memory cost (Mixtral 8x22B has 141B total but ~39B active; weight memory is *total* though).
+
+**References.**
+- [Llama 3.1 release page](https://ai.meta.com/blog/meta-llama-3-1/) — model specs.
+- [Pope et al. — "Efficiently Scaling Transformer Inference"](https://arxiv.org/abs/2211.05102) — TP scaling math.
+
+---
+
+### Q: TPU vs. GPU for inference — what are the trade-offs?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [tpu, gpu, accelerators]
+
+**Short answer.** **GPUs (NVIDIA H100/H200)** have the broader software ecosystem (CUDA, all major serving stacks), strong fp8 throughput, and flexible programmability. **TPUs (Google v5p/v6e)** offer comparable peak compute per accelerator, very high inter-chip bandwidth via the TPU pod fabric, and tight integration with JAX. Both are competitive; the deciding factors are usually software ecosystem (CUDA dominance), cloud availability, and software-stack lock-in. Most public OSS LLMs target GPUs first.
+
+**Expansion / why this is the answer.**
+- **Per-chip peak compute** (bf16): H100 ~989 TFLOPs; TPU v5p ~459 TFLOPs (per chip; pods scale to thousands). H100 is more compute-dense per chip; TPU pods scale further with the fabric.
+- **Memory**:
+  - H100 SXM5: 80 GB HBM3, 3.35 TB/s.
+  - H200: 141 GB HBM3e, 4.8 TB/s.
+  - TPU v5p: 95 GB HBM, ~2.7 TB/s.
+- **Inter-chip bandwidth**:
+  - NVLink (intra-node, up to 8 GPUs): ~900 GB/s per GPU.
+  - TPU OCI (optical circuit interconnect): pod fabric scales to thousands of chips with near-uniform bandwidth.
+  - For very-large-scale training/inference, TPU pod fabric is advantageous.
+- **Software**:
+  - GPU: CUDA, PyTorch, vLLM, TensorRT-LLM, the entire OSS LLM ecosystem.
+  - TPU: JAX, Flax, TFRT; some PyTorch support via PyTorch/XLA but with rough edges.
+- **Practical considerations**:
+  - Most OSS LLMs are released as PyTorch checkpoints; running on TPU requires conversion.
+  - TPU is Google-Cloud-only (you can't buy them).
+  - GPU pricing varies; H100 has been supply-constrained.
+- **Apple/Other**:
+  - AWS Inferentia/Trainium, Microsoft Maia, Cerebras, Groq, etc. — niche; primarily for specific cost or latency goals.
+
+**Common follow-ups.**
+- "Why does Google use TPUs internally?" → Vertical integration, cost, and the JAX ecosystem built around them.
+- "Are AMD MI300 GPUs viable?" → Increasingly yes; ROCm has matured; some labs run on MI300X. CUDA dominance still skews choice.
+
+**Common mistakes.**
+- Citing peak TFLOPs alone — memory bandwidth and software stack matter more in practice.
+
+**References.**
+- [NVIDIA H100 datasheet](https://www.nvidia.com/en-us/data-center/h100/) — H100 spec.
+- [Google TPU v5p](https://cloud.google.com/tpu/docs/v5p) — TPU spec.
+
+---
+
+### Q: What is asynchronous batching / dynamic batching in inference?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [batching, asynchronous, dynamic-batching]
+
+**Short answer.** Dynamic / asynchronous batching collects multiple in-flight requests in a short waiting window and groups them into a single batch before running the model. The wait increases per-request latency slightly but improves throughput by amortizing the GPU's memory traffic. In LLM serving specifically, continuous batching (per decode-iteration) is the LLM-shaped version; dynamic batching is more typical for CV models or one-shot inference.
+
+**Expansion / why this is the answer.**
+- **Static batching**: client controls batch size; rare in production.
+- **Dynamic batching**: server collects requests for up to N ms; runs together. Standard for CV (image classification, detection); used in Triton Inference Server.
+- **Continuous batching**: LLM-specific; admits new requests mid-decode. See [Continuous batching question](#q-walk-me-through-continuous-inflight-batching-why-is-it-crucial-for-llm-serving) in T4.
+- **Why dynamic batching matters for non-LLM**: many CV models are heavily compute-bound at small batch; batching to >32 doubles or triples throughput at minimal latency cost.
+- **Why LLMs are different**:
+  - Variable output length means request lifetimes vary wildly; static-batch waste is high.
+  - Continuous batching is the LLM answer to this.
+  - Dynamic batching as a strict per-request scheme is still useful for *prefill* batching (group several prompts together).
+- **Practical considerations**:
+  - Wait time `T_wait` is a hyperparameter; too low loses batching benefit, too high adds latency.
+  - Different model versions can be batched together if they share weights (e.g., LoRA serving with shared base).
+
+**Common follow-ups.**
+- "How do you decide `T_wait`?" → Empirical: simulate on your traffic. Typical: 10–50 ms for batch-friendly workloads.
+- "What about variable input length in dynamic batching?" → Pad to max length in the batch; padding cost is a known overhead, partially fixed by sequence packing.
+
+**Common mistakes.**
+- Conflating dynamic batching (per-request waiting) with continuous batching (per-iteration admission).
+
+**References.**
+- [NVIDIA Triton Inference Server — Dynamic Batcher docs](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#dynamic-batcher).
+- [Yu et al. — "Orca"](https://www.usenix.org/conference/osdi22/presentation/yu) — continuous batching.
+
+---
+
+### Q: How does prefill chunking interact with continuous batching?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [chunked-prefill, continuous-batching, sarathi]
+
+**Short answer.** Chunked prefill splits a long prompt into ~512-token chunks and processes one chunk per scheduling step, interleaved with decode steps from other requests. This prevents a single long prefill from blocking decode (and spiking tail latency), while letting continuous batching admit and progress many requests simultaneously. Sarathi-Serve (Agrawal et al. 2024) is the canonical reference; vLLM and SGLang ship it.
+
+**Expansion / why this is the answer.**
+- **The problem without chunked prefill**:
+  - A 32k-prompt request enters the system.
+  - Prefill computes the entire prompt in one forward pass (seconds).
+  - During those seconds, decode of *other* requests is blocked or slow.
+  - Tail latency for streaming users spikes.
+- **Chunked prefill** (Sarathi-Serve):
+  - Split the prompt into chunks (e.g. 512 tokens).
+  - Each scheduling iteration: do one chunk of prefill + decode steps for other in-flight requests in the same forward pass.
+  - The single iteration processes mixed prefill + decode work.
+- **Effect**:
+  - First-token-latency for the long-prompt request rises a bit (it now takes ~`n_prompt/chunk_size` scheduling steps).
+  - Inter-token-latency for all *other* requests stays steady.
+  - Tail latency p99 drops dramatically.
+- **Tuning**:
+  - Chunk size: 512 typical. Larger = fewer iterations for the long request, but more decode blocking per iteration.
+  - The scheduler's decode/prefill ratio per iteration.
+
+**Common follow-ups.**
+- "Does chunked prefill help when there's no concurrent decode load?" → No; it adds overhead for no benefit. Beneficial only under multi-tenant load.
+- "Difference between chunked prefill and splitwise?" → Chunked prefill stays in one GPU pool; Splitwise/disaggregation puts prefill and decode on *separate* GPUs entirely.
+
+**Common mistakes.**
+- Confusing with "speculative decoding."
+- Setting chunk size too small (overhead dominates).
+
+**References.**
+- [Agrawal et al. — "Sarathi-Serve"](https://arxiv.org/abs/2403.02310) — chunked prefill canonical paper.
+
+---

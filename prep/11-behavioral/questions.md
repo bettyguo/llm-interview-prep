@@ -372,3 +372,112 @@ A good story:
 The interviewer wants: judgment under technical-strategy uncertainty. This is *the* differentiating question for senior AI roles.
 
 ---
+
+### Q: How would you respond if your AI product was used unsafely or in a way you didn't intend?
+
+**Category:** behavioral
+**Difficulty:** senior
+**Tags:** [ai-ethics, safety, ai-specific]
+
+**Short answer.** Acknowledge the misuse is real (don't deflect). Walk through how you'd: (1) **understand the scope** (which users, how often, what impact); (2) **mitigate immediately** if active harm (block, restrict); (3) **investigate root cause** (was it a known risk that slipped through, or a novel pattern?); (4) **fix systemically** (model behavior, product UX, content filters); (5) **communicate**, internally and externally as appropriate. Show that you treat safety as a product responsibility, not someone-else's-problem.
+
+**Expansion / why this is the answer.**
+A strong story:
+- Names a real failure mode (model gave bad medical advice; agent took an irreversible action; chatbot was jailbroken into producing harmful content).
+- Walks through the specific response: who you brought in, what immediate gating was put in place, what the long-term fix was.
+- Demonstrates that safety isn't an afterthought.
+
+What lands poorly:
+- "We have a safety team; they handle it." → punts the responsibility.
+- "The model is just non-deterministic." → minimizes accountability.
+- A vague "we updated the prompt." → no real fix.
+
+What lands well:
+- Detection: how did you find out? (Monitoring, user report, red-team?)
+- Mitigation: what was done in the first hour?
+- Systemic: what changed in the eval, prompt, model, or product UX?
+- Communication: who needed to know, what was said.
+
+**Common follow-ups.**
+- "What's the hardest part of AI safety in production?" → The long tail of edge cases that no eval covers; continuous probing.
+- "How do you balance safety with usability?" → Tight refusal rules ruin product UX; over-permissive rules cause harm. Tune with both axes measured (over-refusal + harm rate).
+
+**Common mistakes.**
+- Treating "AI safety" as a brand concern rather than a real failure mode.
+- No structural fix.
+
+**Signal.**
+The interviewer is calibrating: do you take AI risk seriously? Can you respond like a senior IC or manager when a real incident occurs? Are you intellectually honest about the limits of current models?
+
+---
+
+### Q: Tell me about a time you disagreed with leadership about an AI strategy decision.
+
+**Category:** behavioral
+**Difficulty:** senior
+**Tags:** [disagreement, judgment, leadership]
+
+**Short answer.** Pick a story where (a) the disagreement was substantive (not tone or process), (b) you advocated with evidence and remained collaborative, (c) the resolution was either "leadership convinced you with new info" or "they overrode your concern and you supported the call publicly while preparing for the failure mode you predicted." Show that you can disagree-and-commit without losing your judgment.
+
+**Expansion / why this is the answer.**
+What makes a story strong:
+- **Specific stakes**: "leadership wanted to ship the agent with no human-in-the-loop on financial actions."
+- **Your evidence**: "I ran an eval showing the agent fails 8% of the time on amount-disambiguation; for $1M/day this is real risk."
+- **The exchange**: "I escalated, brought the numbers; we met for 30 min; the VP asked good questions."
+- **Resolution**: "We added human-in-the-loop above $10k thresholds; below, the model handles directly. I supported the call; my predicted failure mode hasn't fired because of the threshold."
+- **What you learned**: "Anchoring the disagreement on quantitative risk made it actionable."
+
+What doesn't land:
+- "Leadership was wrong; I told them so; they ignored me; I was right." — reads as ego.
+- "I disagreed but went along to be a team player." — reads as no spine.
+- A trivial disagreement.
+
+**Common follow-ups.**
+- "What if leadership doesn't have AI expertise?" → Translate to their language: cost, risk, user impact. Don't lecture; meet them where they are.
+- "When do you give up arguing?" → After you've made the case clearly, escalated appropriately, and the decision is firm. Then disagree-and-commit publicly while flagging the risk in the doc.
+
+**Common mistakes.**
+- Picking a story where you "won" — reads as ego.
+- Picking a story where you capitulated — reads as no spine.
+- No follow-through after the disagreement.
+
+**Signal.**
+The interviewer is calibrating: technical judgment, collaboration, ability to disagree productively. Critical for senior+ levels; flagged on every IC and EM ladder.
+
+---
+
+### Q: How do you stay productive when your model is training for hours / days?
+
+**Category:** behavioral
+**Difficulty:** intro
+**Tags:** [productivity, ml-workflow, time-management]
+
+**Short answer.** Treat long training runs as background processes, not blocking tasks. Productive patterns: (a) **parallelize work**: read papers, write the eval suite, refactor the training script while training runs; (b) **launch multiple runs in parallel** if compute allows (hyperparameter sweep); (c) **set up checkpoints + tensorboard / Weights & Biases for at-a-glance monitoring**; (d) **batch decisions weekly** rather than per-run. The pathology to avoid: staring at the loss curve.
+
+**Expansion / why this is the answer.**
+A strong answer reveals workflow maturity:
+- "I have a checklist of work-in-flight: read 2 papers, write next eval, document last experiment, plan next sweep."
+- "Tensorboard / W&B dashboards mean I check status passively, not actively."
+- "Compute-permitting, I always have a baseline run + a hypothesis run going."
+
+What lands poorly:
+- "I just monitor the loss curve." → narrow, low-leverage.
+- "I work on other things." (vague) → no specifics.
+
+What's worth mentioning:
+- **Failure recovery**: when a run crashes overnight, do you have alerts? Auto-restart?
+- **Hypothesis log**: what you're testing each run, so the results compound.
+- **Compute discipline**: is the cluster sized right? Are you queuing efficiently?
+
+**Common follow-ups.**
+- "How do you decide when to kill a run?" → Loss curves vs. baseline; if behind on a key metric after `N%` of steps, kill.
+- "How do you handle the boredom?" → Build a habit: every run has a written hypothesis and a written outcome; treat ML as small-N experimentation, not babysitting.
+
+**Common mistakes.**
+- Watching the loss curve all day.
+- No notes; runs blur together; can't recall what worked.
+
+**Signal.**
+This is a workflow question more than a deep behavioral. It signals: do you have the rhythm of an experienced ML engineer? Are you running experiments scientifically or by vibes?
+
+---
