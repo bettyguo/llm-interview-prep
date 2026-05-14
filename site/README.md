@@ -4,7 +4,7 @@ A static, single-page study app that sits on top of the question bank in [`prep/
 
 | Mode | What it's for |
 |------|---------------|
-| **Browse** | Filter / search 209 questions; click to expand the full answer with follow-ups, mistakes, and references. |
+| **Browse** | Filter / search all 501 questions; click to expand the full answer with follow-ups, mistakes, and references. |
 | **Flashcards** | Front: question + tags. Back: short answer + expansion. Rate yourself; Leitner-style spaced repetition (1d → 3d → 7d → 14d → 30d) stored in `localStorage`. |
 | **MCQ Quiz** | Auto-generated 4-option questions: the correct option is the first sentence of the short answer, the three distractors are pulled from the entry's documented **Common mistakes**. Tracks per-session and lifetime accuracy. |
 | **Mock Interview** | Pick topic + difficulty + count + per-question timer. Sequential timed questions with a notes textarea, model-answer reveal, self-rating (1–5), and a per-topic scorecard at the end. |

@@ -38,7 +38,7 @@ Reading answers is passive prep. The interview itself is active recall under tim
 
 | Mode | What it does | When to use it |
 |------|--------------|----------------|
-| **🔎 Browse** | Search, filter, and read all 285+ Qs with full answer / follow-ups / common mistakes / references. | First pass through a new topic. |
+| **🔎 Browse** | Search, filter, and read all 501 Qs with full answer / follow-ups / common mistakes / references. | First pass through a new topic. |
 | **🧠 Flashcards** | Spaced repetition (1d → 3d → 7d → 14d → 30d, Leitner-style). Rate yourself; cards you miss come back sooner. | Daily 15–30 min review across the cram weeks. |
 | **✅ MCQ Quiz** | Auto-generated 4-option questions where the **three distractors are the documented Common mistakes** for that question — the exact half-truths interviewers listen for. | Quick gap-finding: "do I actually know this or just recognize it?" |
 | **⏱ Mock Interview** | Timed sequence with notes textarea, model-answer reveal, self-rating 1–5, per-topic scorecard at the end. | Final week: pressure-test under realistic conditions. |
