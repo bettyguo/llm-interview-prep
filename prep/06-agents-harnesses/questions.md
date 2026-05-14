@@ -841,3 +841,917 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [OpenAI — Deep Research announcement](https://openai.com/index/introducing-deep-research/) — product description.
 
 ---
+
+### Q: What is "function calling" vs "tool use" — are they the same?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [function-calling, tool-use, terminology]
+
+**Short answer.** Almost synonymous. **Function calling** is OpenAI's original term (mid-2023); **tool use** is Anthropic's term (2023+). Both mean: declare a schema of available functions; the model emits a structured call; you execute it; return the result. Modern usage: "tool use" is the broader / preferred term; "function calling" is a specific implementation detail.
+
+**Expansion / why this is the answer.**
+- Same mechanism: schema declaration + structured-call output + execution + result-back.
+- Differences are mostly historical:
+  - OpenAI: `functions` parameter (deprecated) → `tools` (current).
+  - Anthropic: always called it `tools`.
+  - Both now use a `tool_use` / `tool_call` block format.
+
+**Common follow-ups.**
+- "Why the rename?" → "Tool" is more general — it doesn't have to be a function.
+
+**Common mistakes.**
+- Treating the two terms as describing different things.
+
+**References.**
+- [OpenAI Function Calling docs](https://platform.openai.com/docs/guides/function-calling).
+- [Anthropic Tool Use docs](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview).
+
+---
+
+### Q: What is "parallel tool calling"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [parallel-tools, latency]
+
+**Short answer.** When multiple independent tool calls can satisfy a user request (e.g. "get the weather in NYC and Tokyo"), the model emits *multiple tool-use blocks in a single turn*. The harness executes them in parallel and returns all results. Reduces sequential latency dramatically. Supported by OpenAI, Anthropic, Gemini in their tool-use APIs.
+
+**Expansion / why this is the answer.**
+- **Sequential pattern** (old): model asks for NYC weather → harness returns → model asks for Tokyo → harness returns. 4 LLM round-trips.
+- **Parallel pattern**: model asks for NYC + Tokyo simultaneously → harness runs both in parallel → returns both. 2 LLM round-trips.
+- **Model-side**: must be trained to recognize independent calls and emit them together.
+- **Harness-side**: execute tools concurrently (asyncio, threads).
+
+**Common follow-ups.**
+- "When does parallel hurt?" → When calls have dependencies; sequential is required.
+- "How do models learn this?" → Fine-tuning on examples with multi-tool turns.
+
+**Common mistakes.**
+- Sequentializing parallel-capable tools; wasted latency.
+
+**References.**
+- [OpenAI parallel function calling](https://platform.openai.com/docs/guides/function-calling#parallel-function-calling).
+
+---
+
+### Q: How does an agent decide when to use a tool vs answer directly?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [tool-selection, routing]
+
+**Short answer.** The model evaluates the request and the available tool schemas at each turn. Decision heuristics (learned from training): the answer requires current info → search tool; the answer requires computation → code tool; the answer requires private data → KB tool; otherwise → answer from parametric knowledge. Tool descriptions in the system prompt heavily shape this decision; design them carefully.
+
+**Expansion / why this is the answer.**
+- The model has implicit routing logic from training.
+- **Signals that trigger tool use**:
+  - User asks for current info ("today's weather").
+  - User asks for math / structured computation.
+  - User asks about a specific entity not in the model's parametric knowledge.
+- **Signals to NOT use a tool**:
+  - General knowledge questions.
+  - Reasoning that doesn't need external info.
+  - Casual conversation.
+- **Critical**: tool descriptions should explain *when* to use the tool, not just *what* it does.
+
+**Common follow-ups.**
+- "What if the model over-uses tools?" → System prompt: "Only call tools when necessary." Adjust tool descriptions.
+- "What if it under-uses?" → Make the tool name + description more discoverable; include example use cases.
+
+**Common mistakes.**
+- Tool descriptions that say "this tool fetches X" but not "use when user asks about X."
+
+**References.**
+- [Anthropic — Tool use guidance](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview).
+
+---
+
+### Q: What is "self-reflection" in agents?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [self-reflection, reflexion, critique]
+
+**Short answer.** Self-reflection: after an action, the agent generates a *critique* of its own approach, identifying mistakes, and uses the critique to revise the next attempt. Reflexion (Shinn et al. 2023) is the canonical example. Useful for tasks with clear success/failure (code, math) where the agent can iterate. Cost: extra LLM calls per task.
+
+**Expansion / why this is the answer.**
+- **The loop**:
+  1. Agent attempts the task.
+  2. Detect failure (verifier or LLM-judge).
+  3. Agent generates a written reflection: "I failed because X; next time I should Y."
+  4. Reflection added to memory.
+  5. Agent retries with reflection in context.
+- **Variants**:
+  - **Reflexion** (Shinn et al. 2023): textual reflection.
+  - **Critic-Actor** (separate critic model).
+  - **Test-time reflection**: even single-attempt tasks benefit from a "did I miss anything?" step.
+
+**Common follow-ups.**
+- "Does this work without a verifier?" → Less reliable; the reflection itself can be wrong.
+- "How many retries?" → Diminishing returns past 2–3; sometimes triggers infinite loops.
+
+**Common mistakes.**
+- Treating reflection as universally helpful.
+
+**References.**
+- [Shinn et al. — "Reflexion"](https://arxiv.org/abs/2303.11366).
+
+---
+
+### Q: What's "subagent delegation" / hierarchical agents?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [subagent, hierarchical, delegation]
+
+**Short answer.** A lead agent delegates well-defined sub-tasks to subagents with fresh contexts; each subagent returns a summary; lead integrates. Useful for parallel research, isolation of complex sub-tasks, and managing context length. Anthropic's research swarm is the canonical example. Trade-off: more LLM calls; loss of low-level details in the summary handoff.
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - Lead agent plans + decomposes the task.
+  - Spawns N subagents in parallel, each with focused instructions.
+  - Subagents work independently in fresh contexts.
+  - Each returns a summary.
+  - Lead integrates summaries into the final answer.
+- **When this wins**:
+  - Parallel sub-research (Anthropic's swarm).
+  - Complex tasks where each sub-task needs deep focus.
+  - Context-length pressure on a single agent.
+- **When it doesn't**:
+  - Tightly coupled sub-tasks.
+  - Tasks where the summary-handoff loses critical detail.
+
+**Common follow-ups.**
+- "Coordination overhead?" → Lead must structure subagent prompts well; tradeoff vs. doing it all in one context.
+- "Failure mode?" → Subagent reports incorrect summary; lead trusts it.
+
+**Common mistakes.**
+- Subagents on inherently sequential tasks; loses the parallelism benefit.
+
+**References.**
+- [Anthropic — "How we built our multi-agent research system"](https://www.anthropic.com/engineering/built-multi-agent-research-system).
+
+---
+
+### Q: How does context compaction / summarization work in long agent loops?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [compaction, summary, long-context-agent]
+
+**Short answer.** As an agent loop runs, context fills up. Compaction: when context exceeds a threshold (e.g. 70% of model max), summarize older turns into a concise running summary; replace the originals with the summary. Done well, the agent doesn't notice. Done poorly, critical info is lost mid-task.
+
+**Expansion / why this is the answer.**
+- **Triggers**:
+  - Token-count threshold.
+  - End-of-phase markers.
+- **Process**:
+  - LLM summarizes the older portion of the trace.
+  - Tool calls compress to "tool X returned Y."
+  - File contents summarize to "file Z contains W."
+  - Replace original tokens with summary.
+- **Risks**:
+  - Loss of critical detail.
+  - Reference to "the file I created" without specifying which.
+- **Mitigations**:
+  - Preserve specific named entities, identifiers.
+  - Keep the original goal + most-recent N turns verbatim.
+  - Refer to files / artifacts by name, not by re-quoting content.
+
+**Common follow-ups.**
+- "Claude Code's auto-compact?" → Built-in periodic compaction when context fills.
+- "Why not just larger context?" → Even with 1M context, agents accumulate fast; compaction is still useful.
+
+**Common mistakes.**
+- Aggressive compaction; the agent loses the plot.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What's "scratchpad" / "notebook" in an agent?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [scratchpad, notebook, agent-memory]
+
+**Short answer.** A persistent file or memory the agent writes notes to during a task — observations, intermediate facts, plans, reminders. Acts as an externalized working memory that survives context compaction. Useful for long-horizon tasks where the agent needs to track many facts. Implementations: a file the agent reads/writes via tools, or a structured key-value memory.
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - Agent has tools: `read_notes`, `write_notes`, `append_note`.
+  - During task: model writes interim findings.
+  - On context compaction: notes survive (the file is intact).
+- **Benefits**:
+  - Externalized memory; not subject to context-window forgetting.
+  - Auditable: human can read what the agent learned.
+- **Common content**:
+  - Plans / sub-task lists.
+  - Facts discovered during research.
+  - Errors encountered (so the agent doesn't repeat them).
+
+**Common follow-ups.**
+- "Connection to memory?" → Scratchpad is task-scoped; memory is cross-session. Both work via similar tools.
+- "Why not just keep it in context?" → Context window pressure; compaction.
+
+**Common mistakes.**
+- Agent doesn't use scratchpad even when available; tool description is the fix.
+
+**References.**
+- [Anthropic Claude Code docs](https://docs.claude.com/en/docs/claude-code/overview).
+
+---
+
+### Q: How do you handle long-horizon planning in agents?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [planning, long-horizon, plan-execute]
+
+**Short answer.** Three approaches: (a) **Plan-and-execute**: high-level plan upfront; execute step-by-step. (b) **ReAct with re-plan**: re-plan periodically as new info emerges. (c) **Hierarchical**: lead-agent plans; subagents execute sub-goals. For tasks longer than a few steps, replanning beats one-shot planning — the world changes during execution.
+
+**Expansion / why this is the answer.**
+- **Plan-and-execute**:
+  - Generate plan as `[step 1, step 2, ...]`.
+  - Execute each step.
+  - Risk: plan is wrong; agent doesn't recover.
+- **ReAct + replan**:
+  - Per-step Reason → Act → Observe.
+  - Periodic re-plan: "given what I've learned, what's the new plan?"
+  - More flexible; handles surprises.
+- **Hierarchical**:
+  - Lead-agent: high-level plan + delegation.
+  - Sub-agents: tactical execution.
+- **Empirical**: pure ReAct with strong tools beats elaborate planning structures on most benchmarks (Anthropic).
+
+**Common follow-ups.**
+- "When does planning help vs ReAct alone?" → Tasks where parallel execution is possible, or where the agent's plan-context helps inter-step coordination.
+- "Failure mode of plan-and-execute?" → Initial plan wrong; agent rigidly follows.
+
+**Common mistakes.**
+- Plan-once at start; never replan.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What's "thought summarization" in agent loops?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [thought-summary, compaction]
+
+**Short answer.** Specific case of compaction: summarize the model's reasoning steps (`Thought:` blocks in ReAct) without the underlying tool outputs. Reduces context faster than full-trace summary. Risk: losing causal reasoning that explains the current state.
+
+**Expansion / why this is the answer.**
+- **What gets summarized**:
+  - Reasoning chains.
+  - Step outcomes ("did test A pass? yes").
+  - High-level plan state.
+- **What stays verbatim**:
+  - Current step's tool outputs.
+  - Most recent reasoning.
+  - Key artifacts (file names, IDs).
+
+**Common follow-ups.**
+- "Does this preserve correctness?" → Mostly; some tasks regress.
+
+**Common mistakes.**
+- Aggressive thought summarization; agent doesn't know what it concluded.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What is "human-in-the-loop" (HITL) in agent design?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [hitl, gating, agent-safety]
+
+**Short answer.** Human-in-the-loop: gates on risky agent actions where a human must approve before execution. Examples: sending email, deploying code, making payments. Critical for production agents touching real-world state. Implemented as: tool execution paused; UI presents the proposed action; human approves/rejects/edits.
+
+**Expansion / why this is the answer.**
+- **Why HITL**:
+  - Errors with real-world consequences (financial, legal, safety).
+  - Compliance requirements.
+  - User trust.
+- **Levels**:
+  - Always-human: every action confirmed.
+  - Threshold-based: low-stakes auto; high-stakes confirmed.
+  - Post-hoc audit: log everything; human reviews periodically.
+- **UX**:
+  - Show the proposed action in human-readable form.
+  - Allow editing.
+  - Allow batch approval.
+
+**Common follow-ups.**
+- "When can you remove HITL?" → After enough operational data shows the agent is reliable; even then, audit logs.
+- "Anthropic Computer Use HITL?" → Default: confirm certain action types.
+
+**Common mistakes.**
+- No HITL on a fully-autonomous agent doing real-world actions.
+
+**References.**
+- [Anthropic Computer Use docs](https://docs.anthropic.com/en/docs/build-with-claude/computer-use).
+
+---
+
+### Q: What is "agent ergonomics" — designing tools the model can use well?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tool-ergonomics, design, agents]
+
+**Short answer.** Tools should be: (1) **discoverable** — clear name + when-to-use description; (2) **forgiving** — accept reasonable variations in input; (3) **informative** — return errors the model can act on; (4) **composable** — outputs feed into other tools naturally; (5) **idempotent** — safe to retry; (6) **bounded** — single responsibility, single noun_verb. Bad tools cause agent failures even with strong base models.
+
+**Expansion / why this is the answer.**
+- **Discoverable**:
+  - Verb_noun naming: `search_kb`, not `lookup`.
+  - Description explains when, not just what.
+- **Forgiving**:
+  - Accept dates as strings or epoch.
+  - Default to sensible behaviors for missing args.
+- **Informative errors**:
+  - Bad: `Error: invalid argument`.
+  - Good: `Error: 'date' must be ISO 8601; got '2025/03/15'. Try '2025-03-15'.`
+- **Composable**:
+  - Output of `search_kb` should be parseable by the model and usable as input to `fetch_doc(doc_id)`.
+- **Idempotent**:
+  - `get_user(id)` is fine to retry.
+  - `transfer_money(...)` needs an idempotency key.
+- **Bounded**:
+  - `search_kb` vs. `multi_purpose_tool(action="search", ...)` — the former is far better for routing.
+
+**Common follow-ups.**
+- "How do you test tool ergonomics?" → Eval on tool-use accuracy; trace inspection.
+- "Anthropic's design guidance?" → Their building-effective-agents post emphasizes these principles.
+
+**Common mistakes.**
+- One mega-tool with `action` parameter; the model fumbles routing.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What is "agent observability" / tracing in production?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [observability, tracing, langsmith]
+
+**Short answer.** Log every (state, thought, action, observation) tuple per agent step; visualize the trace; aggregate per-task metrics. Tools: LangSmith, Phoenix, Weights & Biases, internal solutions. Critical for debugging agent failures — without traces, you can't reproduce the path the agent took.
+
+**Expansion / why this is the answer.**
+- **What to log**:
+  - Per step: input context, model output, tool calls + args + results.
+  - Per session: total cost, latency, success status.
+- **Visualization**:
+  - Tree-style trace browser.
+  - Side-by-side comparison of failing vs successful runs.
+- **Per-task metrics**:
+  - Success rate.
+  - Step count to success.
+  - Cost per task.
+  - Tool-call accuracy.
+- **Tools**:
+  - **LangSmith**: LangChain's tracing service.
+  - **Phoenix** (Arize): OSS observability.
+  - **Weights & Biases Traces**: integrates with W&B.
+  - **OpenTelemetry**: vendor-neutral.
+
+**Common follow-ups.**
+- "What's hard about tracing agents?" → Nested calls (subagents); branching (parallel tool calls); large prompts.
+- "PII?" → Redact or aggregate before logging.
+
+**Common mistakes.**
+- Trying to debug without traces.
+
+**References.**
+- [LangSmith docs](https://docs.smith.langchain.com/).
+- [Phoenix project](https://phoenix.arize.com/).
+
+---
+
+### Q: What is "OpenAI Assistants API" / hosted-agent abstraction?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [openai-assistants, hosted-agent]
+
+**Short answer.** Hosted-agent APIs (OpenAI Assistants, Anthropic Messages with tools): the vendor manages the agent loop, context state, tool execution coordination — you describe the assistant once and submit user messages. Trades flexibility for simplicity. Good for prototypes; many teams migrate to custom loops for production control.
+
+**Expansion / why this is the answer.**
+- **OpenAI Assistants API (v2)**:
+  - Define an assistant with name, instructions, tools, model.
+  - Create threads (conversations).
+  - Submit messages; OpenAI runs the agent loop.
+- **Anthropic Messages API + tools**: gives you the building blocks but you control the loop.
+- **Trade-offs**:
+  - Assistants: easier setup; less control; vendor lock-in; sometimes opaque pricing.
+  - Custom loop: full control; more work.
+
+**Common follow-ups.**
+- "When to use Assistants?" → Quick prototypes; non-technical teams; limited dev resources.
+- "When to roll your own?" → Production at scale; custom routing; multi-vendor.
+
+**Common mistakes.**
+- Building on Assistants then needing custom logic; migration is painful.
+
+**References.**
+- [OpenAI Assistants API docs](https://platform.openai.com/docs/assistants/overview).
+
+---
+
+### Q: What is "vibe-driven" agent development, and why is it problematic?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [eval-driven, anti-pattern]
+
+**Short answer.** "Vibe-driven": tuning prompts based on a handful of manual examples without a systematic eval set. Looks fine on the demos; regresses unpredictably in production. The fix: build an eval set early (50–200 examples), measure changes against it, never ship a change that regresses. Eval-driven development is the antidote.
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - Dev tweaks prompt; tests on 3 examples; ships.
+  - In production, edge cases break.
+- **Why it persists**:
+  - Building evals is unglamorous.
+  - LLM apps "feel" close to working.
+- **The fix**:
+  - Build an eval set before iterating.
+  - Every change: run against eval; check for regressions.
+  - CI: lock the eval; require non-regression to merge.
+- **Cost**: 1–2 days of upfront effort; saves weeks of production firefighting.
+
+**Common follow-ups.**
+- "What's the minimum viable eval set?" → 50 examples covering normal + edge cases.
+- "How often do you update the eval?" → Add new examples as production reveals failure modes.
+
+**Common mistakes.**
+- Treating evals as optional; "we'll add them later."
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: How would you build a "Q&A over your codebase" agent?
+
+**Category:** system-design
+**Difficulty:** senior
+**Tags:** [code-agent, codebase-qa]
+
+**Short answer.** Components: (a) code-aware retriever (semantic + symbol-search via tree-sitter + call-graph); (b) chunker that respects function/class boundaries; (c) agent loop with tools: `search`, `read_file`, `find_callers`, `grep`; (d) LLM with citations to source files + line numbers. Eval on internal code questions ("where is X used?", "what does Y do?", "how do you call Z?").
+
+**Expansion / why this is the answer.**
+- See T5 base "code search" entry for the retrieval depth.
+- **Agent-specific additions**:
+  - Tool-use to navigate: `read_file(path)`, `find_callers(symbol)`, `find_implementations`.
+  - LSP integration where available.
+  - Persistent code-graph index updated on commits.
+- **Production examples**:
+  - Sourcegraph Cody.
+  - GitHub Copilot Workspace.
+  - Cursor's "@codebase" feature.
+
+**Common follow-ups.**
+- "Latency target?" → Interactive: 2–5s for first answer; few seconds for follow-ups with cached context.
+- "How to keep index fresh?" → Commit hooks; incremental re-embedding.
+
+**Common mistakes.**
+- Pure dense retrieval; misses exact-name code queries.
+
+**References.**
+- [Sourcegraph Cody docs](https://sourcegraph.com/docs/cody).
+
+---
+
+### Q: What's "agentic SQL"?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [text-to-sql, sql-agent]
+
+**Short answer.** A text-to-SQL agent that doesn't just generate one SQL query — it iterates: query the schema, attempt a query, examine results, refine, iterate. Handles ambiguous user questions and schema discovery. Better than one-shot text-to-SQL for complex databases. Production examples: many enterprise data-Q&A tools.
+
+**Expansion / why this is the answer.**
+- **One-shot text-to-SQL**:
+  - LLM emits a single SQL query.
+  - Brittle on complex schemas.
+- **Agentic SQL**:
+  - Tools: `list_tables`, `describe_table`, `run_query`, `summarize_results`.
+  - Loop: explore schema; draft query; run; refine.
+- **Failure modes**:
+  - Hallucinated column names (without schema lookup).
+  - Wrong joins (without inspecting sample data).
+  - Wrong aggregation (semantic ambiguity in the user query).
+- **Eval**: text-to-SQL benchmarks (Spider, BIRD); per-database adaptation.
+
+**Common follow-ups.**
+- "What's BIRD?" → A large text-to-SQL benchmark; harder than Spider.
+- "Production caveats?" → Read-only tools (no DROP TABLE); query timeouts; cost limits.
+
+**Common mistakes.**
+- Letting the agent run destructive queries.
+
+**References.**
+- [Li et al. — "BIRD-Bench"](https://arxiv.org/abs/2305.03111).
+
+---
+
+### Q: What is "task decomposition" by the LLM itself?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [decomposition, planning]
+
+**Short answer.** Before executing, the LLM breaks a complex task into sub-tasks. The decomposition is a planning artifact the agent then executes step-by-step. Works because the LLM's planning ability often exceeds its single-shot execution; explicit breakdown improves quality on multi-step problems.
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - User: "Refactor the auth module to use OAuth instead of session cookies."
+  - LLM decomposes:
+    1. Identify the auth module's files.
+    2. Find usages of session cookies.
+    3. Add OAuth library.
+    4. Replace session checks with OAuth.
+    5. Update tests.
+  - Execute each.
+- **When valuable**:
+  - Multi-step engineering tasks.
+  - Multi-file changes.
+  - Anything with a clear sequence.
+- **Risks**:
+  - Wrong decomposition; agent rigidly follows.
+  - Replanning becomes important.
+
+**Common follow-ups.**
+- "Relation to plan-and-execute?" → Plan-and-execute is a specific pattern that uses task decomposition.
+
+**Common mistakes.**
+- Trying to decompose tasks that don't have clear sub-tasks.
+
+**References.**
+- [Wang et al. — "Plan-and-Solve Prompting"](https://arxiv.org/abs/2305.04091).
+
+---
+
+### Q: What's "open-ended" agent benchmarks vs "closed-ended"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [benchmark-design, open-ended]
+
+**Short answer.** **Closed-ended**: a defined success criterion (tests pass; result equals gold answer). SWE-bench, TAU-bench, MATH. **Open-ended**: no clear success criterion; "write a research report on X." Hard to evaluate; require human judgment or LLM-as-judge on multi-dimensional criteria. The trend: more open-ended as agents tackle harder real-world tasks.
+
+**Expansion / why this is the answer.**
+- **Closed-ended advantages**:
+  - Programmatic verification.
+  - Reproducible.
+  - Comparable across models.
+- **Open-ended challenges**:
+  - Multiple valid answers.
+  - Subjective quality.
+  - LLM-as-judge has limits.
+- **Examples**:
+  - **Closed**: SWE-bench (tests), MATH (answer match), TAU-bench (state match).
+  - **Open**: deep-research output, creative writing, code review.
+
+**Common follow-ups.**
+- "How do you evaluate open-ended outputs?" → Multi-dimensional human judgment + LLM-judge.
+
+**Common mistakes.**
+- Optimizing for closed-ended; deploying on open-ended.
+
+**References.**
+- [Jimenez et al. — "SWE-bench"](https://arxiv.org/abs/2310.06770).
+
+---
+
+### Q: What's "long-horizon coherence" in agents?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [long-horizon, coherence, multi-step]
+
+**Short answer.** The agent's ability to maintain a coherent goal and approach across many steps (10–100+). Failure mode: the agent forgets the goal mid-way ("goal drift") or revisits decisions it already made. Mitigations: persistent goal-marker at top of context; periodic re-state-the-goal; scratchpad for state; small step caps to force progress checks.
+
+**Expansion / why this is the answer.**
+- **The failure modes**:
+  - Forgets goal → drifts off-topic.
+  - Re-makes decisions inconsistently.
+  - Compounding small errors.
+- **Mitigations**:
+  - **Goal marker**: keep the user's original request at the top of context, never compacted.
+  - **Periodic re-statement**: every N steps, summarize "what I'm doing and why."
+  - **Externalized state**: scratchpad with milestones.
+  - **Verifier hooks**: after each phase, verify it's complete before moving on.
+
+**Common follow-ups.**
+- "What's the typical horizon SOTA agents handle?" → 10–50 steps reliable; 100+ degrades.
+- "Why is this hard?" → Information from the start of context attenuates; the lost-in-the-middle problem at agent scale.
+
+**Common mistakes.**
+- No goal-marker; agent forgets what it's doing.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: How would you eval an agent's "stuck" behavior?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [stuck-detection, agent-debug]
+
+**Short answer.** Stuck behavior: agent loops without progress (same action+observation repeated, or no novel state). Detection: compare current state to recent history; if state-similarity high across N steps, mark stuck. Recovery: explicit "you've done this before, try a different approach" intervention, or escalate to human.
+
+**Expansion / why this is the answer.**
+- **Detection signals**:
+  - Recent (state, action, observation) tuples nearly identical.
+  - Step count high without progress on success criterion.
+  - No new files / tools called for many steps.
+- **Recovery**:
+  - Inject a meta-prompt: "You've repeated this action 3 times; try a different approach."
+  - Suggest alternative tools.
+  - Escalate to human.
+  - Hard cap on steps; abort.
+
+**Common follow-ups.**
+- "How do you detect 'progress'?" → Task-specific; e.g., "tests passing more" for coding; "new content read" for research.
+- "Production handling?" → Hard step caps + alert on long runs.
+
+**Common mistakes.**
+- No step cap; agent runs forever.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: How do you handle "fabricated observations" in agent traces?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [fabrication, agent-safety, tool-output]
+
+**Short answer.** Some models, especially earlier or weaker ones, "make up" observations — emit text that *looks like* a tool returned a result but no tool was actually called. Forces: tool-call format enforcement (API rejects model-written observations); validation step that each observation came from a real tool execution; strict format with structured outputs.
+
+**Expansion / why this is the answer.**
+- **The failure**: in a free-text agent trace, the model emits `Observation: success! User created.` without ever calling the tool.
+- **Detection**:
+  - Check that every observation in the trace came from a real tool execution.
+  - Inject the real tool result; the model's hallucination conflicts.
+- **Prevention**:
+  - Use structured tool-use APIs (OpenAI, Anthropic): the API only accepts tool results from the harness.
+  - Never let the model write `Observation:` blocks directly.
+- **Frontier models** (Claude 4, GPT-5, Gemini 2.x) rarely fabricate when using structured APIs.
+
+**Common follow-ups.**
+- "Older models that did this?" → Some early LangChain prompts (un-structured ReAct) suffered. Modern structured APIs eliminate it.
+
+**Common mistakes.**
+- Trusting free-text ReAct without structural enforcement.
+
+**References.**
+- [Anthropic Tool Use docs](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview).
+
+---
+
+### Q: What is "model-vs-environment failure" in agent debugging?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [debug, environment, root-cause]
+
+**Short answer.** When an agent fails, distinguish: (1) **model failure** (wrong reasoning, hallucination, mis-routed tool); (2) **environment failure** (tool returned wrong data, sandbox broken, dependency missing). Different fixes: model failure → prompt / fine-tune / model upgrade; environment failure → fix the tool / infra. Conflating the two wastes effort.
+
+**Expansion / why this is the answer.**
+- **Diagnosis**:
+  - Replay the trace.
+  - At each step: was the model's decision reasonable given what it saw?
+  - Was the tool output correct?
+- **Common environment failures**:
+  - Tool returns stale data.
+  - Tool errors not propagated.
+  - Sandbox missing dependencies.
+- **Common model failures**:
+  - Hallucinated tool name.
+  - Wrong argument format.
+  - Off-topic reasoning.
+
+**Common follow-ups.**
+- "Who fixes which?" → Model failure: ML team. Environment failure: infra team.
+
+**Common mistakes.**
+- Blaming the model for environment issues; spending weeks tuning prompts when the tool was just broken.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What's the "agent eval gold-standard"?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [agent-eval, gold-standard]
+
+**Short answer.** No single gold standard exists. Best practice: combine (a) **per-task success rate** on a held-out eval set with deterministic verifiers; (b) **trace-level metrics** (steps, cost); (c) **human evaluation** of a sampled subset for quality; (d) **adversarial robustness** (jailbreaks, prompt injection); (e) **regression suite** of known-failed cases. Run on every model change; track over time.
+
+**Expansion / why this is the answer.**
+- See T6 base "agent eval" entry.
+
+**Common follow-ups.**
+- "How big should the eval set be?" → 100–500 per use case; more for diverse use cases.
+
+**Common mistakes.**
+- Single-metric eval; misses dimensions.
+
+**References.**
+- [Jimenez et al. — "SWE-bench"](https://arxiv.org/abs/2310.06770).
+
+---
+
+### Q: How do you do "online learning" / agent improvement from production traces?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [online-learning, agent-improvement]
+
+**Short answer.** Collect production traces with outcome labels (success/failure, user feedback). Build a dataset of (failed trace, what should have happened). Either: (a) **prompt tuning** — refine the system prompt to address common failure modes; (b) **fine-tune** — LoRA on a few hundred success/failure examples to shape behavior; (c) **tool / harness improvements** — fix non-model issues. Iterate.
+
+**Expansion / why this is the answer.**
+- **Trace collection**: every production agent run logged with outcome.
+- **Failure clustering**: group failures by pattern; identify root cause.
+- **Improvement levers**:
+  - **Prompt**: cheap; iterate quickly.
+  - **Fine-tune**: more expensive; for systematic behavior changes.
+  - **Tools**: address environment failures.
+- **Regression**:
+  - As you fix one failure mode, ensure others don't worsen.
+  - Eval suite catches regressions.
+
+**Common follow-ups.**
+- "Cost of fine-tuning per improvement cycle?" → LoRA fine-tune: hours of compute; cheap.
+
+**Common mistakes.**
+- One-shot fixes without measuring; the next failure mode appears.
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What's "skill library" / reusable agent capabilities?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [skill-library, voyager, reusable]
+
+**Short answer.** A skill library: a set of reusable, named procedures the agent has learned (or been given) for common sub-tasks. The agent can call existing skills before deciding to build new ones. Voyager (Wang et al. 2023, Minecraft agent) demonstrated this — the agent built up a library of "crafting recipes" over time. In production: pre-defined "skills" as composable tools (e.g. `summarize_pdf`, `parse_invoice`).
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - Common tasks become "skills" — named procedures.
+  - Agent: "to do X, I'll use skill Y."
+  - New tasks: agent composes existing skills or learns new ones (in research settings).
+- **Voyager**: in Minecraft, the agent generated and stored crafting code; reused across episodes.
+- **Production analog**: pre-built skills as tools.
+- **Tradeoff**:
+  - More skills: agent picks from a larger toolbox.
+  - Too many: agent's routing degrades.
+
+**Common follow-ups.**
+- "Self-built vs designed skills?" → Self-built is research; production prefers designed.
+
+**Common mistakes.**
+- Skill library that's too granular; agent gets lost in it.
+
+**References.**
+- [Wang et al. — "Voyager"](https://arxiv.org/abs/2305.16291).
+
+---
+
+### Q: How does Anthropic's Claude Code structure its agent loop?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [claude-code, coding-agent]
+
+**Short answer.** Single-agent ReAct loop; tools for: read/edit files, run bash, search code, web fetch, run tests. Built-in auto-compaction at context-full. Plan mode (presents plan before executing) for non-trivial tasks. TodoWrite-style todo list for multi-step work. Tight integration with the local file system. Distinguished by emphasis on production-grade tool ergonomics + auto-compaction.
+
+**Expansion / why this is the answer.**
+- **Key features**:
+  - Strong base model (Claude).
+  - Direct filesystem access via Bash + Read/Write/Edit tools.
+  - Auto-compaction prevents context overflow.
+  - Plan mode for complex tasks.
+  - Permissions model (some actions auto-approved, others ask).
+- **Design philosophy**:
+  - Single agent + good tools beats elaborate multi-agent.
+  - Persistent context across turns.
+  - Verifier patterns (run tests; check change).
+
+**Common follow-ups.**
+- "Comparison to Cursor / Aider?" → Cursor is editor-integrated; Aider is CLI-based. Different UX, similar capabilities.
+
+**Common mistakes.**
+- Treating Claude Code as a magic black box; it's a ReAct loop + good tools.
+
+**References.**
+- [Anthropic — Claude Code overview](https://docs.claude.com/en/docs/claude-code/overview).
+
+---
+
+### Q: What's "checkpoint and resume" in long agent runs?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [checkpoint, resume, durable]
+
+**Short answer.** Long agent runs (hours-to-days) need checkpointing: periodically write the agent's full state to durable storage; on crash/interrupt, resume from the last checkpoint. Common in: Devin, Claude Code's long sessions, agentic data processing. Implemented via state serialization + idempotent tools + Temporal / Restate-style durable execution.
+
+**Expansion / why this is the answer.**
+- See T6 base "agent state persistence" entry.
+
+**Common follow-ups.**
+- "What gets checkpointed?" → Conversation history, scratchpad state, last completed step, in-flight tool calls (with idempotency keys).
+
+**Common mistakes.**
+- In-memory-only state on long runs.
+
+**References.**
+- [Temporal documentation](https://docs.temporal.io/).
+
+---
+
+### Q: How do you decide when to use one big LLM vs many small specialized ones?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [model-routing, specialized, ensemble]
+
+**Short answer.** Big general LLM: handles most queries; expensive per call. Many small specialized LLMs: each does one job well; cheaper per call; routing complexity. Modern preference: a single strong model + RAG/tool use for specialization; small models for cheap classification / routing decisions. Multi-model ensembles for specific gains (e.g. one verifier model + one generator model).
+
+**Expansion / why this is the answer.**
+- **One big LLM**:
+  - Simpler.
+  - Better quality on hard tasks.
+  - Expensive per call.
+- **Many small specialized**:
+  - Lower cost per call (when routed correctly).
+  - Routing complexity.
+  - Inter-model coordination overhead.
+- **Modern recipe**:
+  - One strong general LLM (Claude/GPT/Gemini).
+  - Small cheap models for triage/classification.
+  - RAG for specialized knowledge.
+  - Tools for actions.
+
+**Common follow-ups.**
+- "When does the specialized approach pay off?" → Very high volume; clear task boundaries.
+
+**Common mistakes.**
+- Defaulting to one model for everything (high cost) or many models (high complexity).
+
+**References.**
+- [Anthropic — "Building effective agents"](https://www.anthropic.com/research/building-effective-agents).
+
+---
+
+### Q: What's the role of "context engineering" vs "prompt engineering"?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [context-engineering, prompt-engineering]
+
+**Short answer.** **Prompt engineering**: optimizing the single prompt for a single response (instruction wording, few-shot examples). **Context engineering**: a broader discipline — assembling the *right context* (retrievals, prior turns, tool descriptions, system rules) for the model to succeed on a task. Includes prompt engineering but also retrieval design, compaction, tool selection. The 2024+ trend term.
+
+**Expansion / why this is the answer.**
+- **Prompt engineering**: word choice in the prompt.
+- **Context engineering**:
+  - What documents to retrieve.
+  - What chat history to preserve.
+  - What tools to expose.
+  - What system rules to enforce.
+  - How to compact when context fills.
+- The model is increasingly capable; context engineering becomes the bottleneck.
+
+**Common follow-ups.**
+- "Is prompt engineering dead?" → No; just one layer of context engineering.
+
+**Common mistakes.**
+- Spending all time on prompt wording; the retrievals / context shape is more impactful.
+
+**References.**
+- [Anthropic engineering blogs on context](https://www.anthropic.com/research/building-effective-agents).
+
+---
