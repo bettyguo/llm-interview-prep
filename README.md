@@ -29,6 +29,22 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 
 ---
 
+## Practice live — supplementary study site
+
+For active recall on top of the question bank, [`site/`](site/) is a single-page study app with five modes:
+
+| Mode | What it's for |
+|------|---------------|
+| **Browse** | Filter, search, and read every Q with full answer / follow-ups / mistakes / references. |
+| **Flashcards** | Front–back cards with Leitner spaced repetition (1d → 3d → 7d → 14d → 30d). Progress in `localStorage`. |
+| **MCQ Quiz** | Auto-generated multiple-choice: correct option is the entry's short answer; distractors are pulled from its documented **Common mistakes** — the exact failure modes interviewers listen for. |
+| **Mock Interview** | Timed sequence with self-rating (1–5) and a per-topic scorecard at the end. |
+| **Cloze** | Key terms blanked in the short answer for active recall. |
+
+Static, local-only (no analytics, no account). Open `site/index.html` directly, or `python tools/build_site.py && cd site && python -m http.server`. Full setup and GitHub Pages deployment notes in [`site/README.md`](site/README.md).
+
+---
+
 ## The topic spine
 
 <!-- BUILD:TOPICS:START -->

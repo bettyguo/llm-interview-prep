@@ -1,7 +1,7 @@
 {
   "generated_by": "tools/build_site.py",
   "version": 1,
-  "total": 246,
+  "total": 285,
   "topics": [
     {
       "slug": "01-ml-dl-fundamentals",
@@ -13,7 +13,7 @@
       "slug": "02-transformers-llm-internals",
       "num": 2,
       "title": "02 — Transformers & LLM Internals",
-      "count": 24
+      "count": 63
     },
     {
       "slug": "03-training-fine-tuning",
@@ -2416,6 +2416,1015 @@
       "topic_num": 2,
       "topic_title": "02 — Transformers & LLM Internals",
       "id": "02-transformers-llm-internals-024"
+    },
+    {
+      "question": "What is the gradient flow through attention? How are attention weights' gradients computed?",
+      "category": "derivation",
+      "difficulty": "senior",
+      "tags": [
+        "attention",
+        "gradients",
+        "derivation"
+      ],
+      "short": "The gradient w.r.t. attention weights `A = softmax(S)` flows through the softmax via the Jacobian `∂A_ij/∂S_ik = A_ij(δ_jk − A_ik)`. The gradient w.r.t. `S = QKᵀ/√d` then splits into `Q` and `K` gradients via standard matrix-product chain rule. FlashAttention recomputes these on the backward pass from the saved softmax statistics (max + sum), avoiding the need to store the full attention matrix.",
+      "expansion": "- Forward: `S = QKᵀ/√d; A = softmax(S, dim=-1); O = AV`.\n- Backward:\n  - `∂L/∂V = AᵀP` where `P = ∂L/∂O`.\n  - `∂L/∂A = PVᵀ`.\n  - `∂L/∂S = J_softmax(∂L/∂A)` — the softmax Jacobian.\n  - `∂L/∂Q = (∂L/∂S) K / √d`.\n  - `∂L/∂K = (∂L/∂S)ᵀ Q / √d`.\n- The softmax Jacobian is large (`n × n` per row); standard implementations materialize the attention matrix to backward through.\n- **FlashAttention backward**: recompute `S` and `A` block by block using stored row-wise max and sum; saves the HBM read.",
+      "follow_ups": [
+        "\"Why is dropout in attention rare in modern LLMs?\" → Adds noise to the gradient and to inference; pretraining at scale doesn't need the regularization.",
+        "\"What's the cost of the backward in attention?\" → Same order as forward FLOPs; the memory savings from FlashAttention are the main benefit."
+      ],
+      "mistakes": [
+        "Forgetting the `/√d` in both forward and backward."
+      ],
+      "tail_label": "References",
+      "tail": "- [Dao et al. — \"FlashAttention\"](https://arxiv.org/abs/2205.14135) — backward pass design.\n- [Vaswani et al. — \"Attention Is All You Need\"](https://arxiv.org/abs/1706.03762).",
+      "short_first": "The gradient w.r.t.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-025"
+    },
+    {
+      "question": "Why do transformers train so much more stably with pre-norm than post-norm?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "pre-norm",
+        "post-norm",
+        "training-stability"
+      ],
+      "short": "In pre-norm (`x + Sublayer(LN(x))`), the residual stream is unchanged through every layer, providing an identity gradient path back to the input. In post-norm (`LN(x + Sublayer(x))`), the LayerNorm scales the sum by inverse-magnitude — so the residual contribution to the gradient is rescaled at every layer, compounding instability at depth. At 100+ layers, post-norm requires careful LR warmup; pre-norm trains stably without.",
+      "expansion": "- Pre-norm gradient flow: `∂x_{l+1}/∂x_l ≈ I + ∂/∂x_l Sublayer(LN(x_l))`. The identity dominates; the perturbation is small for any reasonable sublayer.\n- Post-norm: `∂x_{l+1}/∂x_l = ∂LN/∂[·] · (I + ∂Sublayer/∂x_l)`. The LayerNorm Jacobian rescales — if `Sublayer(x)` has variable scale across layers/steps, the gradient norm fluctuates accordingly.\n- At depth, post-norm without warmup can have gradient norms that blow up early in training, killing stability.\n- Pre-norm + RMSNorm + SwiGLU is the modern recipe.",
+      "follow_ups": [
+        "\"Does pre-norm have any downsides?\" → Some papers report slightly worse final loss vs. post-norm with careful warmup. Almost no one uses post-norm at scale anymore."
+      ],
+      "mistakes": [
+        "Drawing the pre-norm diagram but describing post-norm behavior."
+      ],
+      "tail_label": "References",
+      "tail": "- [Xiong et al. — \"On Layer Normalization in the Transformer Architecture\"](https://arxiv.org/abs/2002.04745).",
+      "short_first": "In pre-norm (`x + Sublayer(LN(x))`), the residual stream is unchanged through every layer, providing an identity gradient path back to the input.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-026"
+    },
+    {
+      "question": "Compare absolute position encodings with relative position encodings.",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "positional-encoding",
+        "absolute",
+        "relative"
+      ],
+      "short": "**Absolute**: each position has a fixed/learned vector added to the embedding (sinusoidal, BERT's learned embeddings). The model learns position-dependent representations. **Relative**: encode the *offset* between query and key positions (Shaw et al. 2018; T5's relative position bias; RoPE's rotation encodes relative position implicitly). Relative encodings generalize better to lengths unseen at training and are the modern default.",
+      "expansion": "- **Absolute** (sinusoidal, learned):\n  - Encodes \"this token is at position 17.\"\n  - Doesn't generalize past training length.\n- **Relative**:\n  - Encodes \"this query token is 5 positions after this key token.\"\n  - Generalizes; multiple flavors:\n    - **Shaw et al. 2018**: explicit learned relative-position embeddings added to keys.\n    - **T5**: scalar relative-position bias added to attention scores.\n    - **RoPE**: rotation of Q, K by angles proportional to position; dot product depends only on the difference.\n    - **ALiBi**: linear penalty by relative distance added to scores.\n- **Why relative matters**: long-context generalization, content-addressable behavior independent of absolute position.",
+      "follow_ups": [
+        "\"Why does BERT use absolute despite the limit?\" → BERT's max length is 512; the limit wasn't binding. Modern long-context models need relative.",
+        "\"Why is RoPE the modern winner?\" → Cheap; relative; extends with PI/YaRN; learned via standard attention."
+      ],
+      "mistakes": [
+        "Treating sinusoidal as \"relative\" — it's absolute (per-position vectors)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Shaw et al. — \"Self-Attention with Relative Position Representations\"](https://arxiv.org/abs/1803.02155) — relative.\n- [Raffel et al. — \"T5\"](https://arxiv.org/abs/1910.10683) — T5's relative bias.\n- [Su et al. — \"RoFormer / RoPE\"](https://arxiv.org/abs/2104.09864).",
+      "short_first": "**Absolute**: each position has a fixed/learned vector added to the embedding (sinusoidal, BERT's learned embeddings).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-027"
+    },
+    {
+      "question": "What is the prefill complexity for attention, and how does FlashAttention change it?",
+      "category": "derivation",
+      "difficulty": "senior",
+      "tags": [
+        "prefill",
+        "flashattention",
+        "complexity"
+      ],
+      "short": "Standard prefill attention is `O(n² · d)` FLOPs and `O(n²)` HBM memory traffic for the attention matrix. FlashAttention keeps the FLOPs at `O(n² · d)` (it's still quadratic; the algorithm computes the same thing) but reduces HBM traffic to `O(n · d)` by tiling — the attention matrix never materializes. The wall-clock speedup comes from the memory-traffic reduction, not from fewer FLOPs.",
+      "expansion": "- Attention forward FLOPs: `O(n² · d)` for `QKᵀ` and another for `AV`.\n- Naive HBM traffic: `O(n² + n · d)` — the `n²` for the attention matrix dominates at long `n`.\n- FlashAttention: tile `Q, K, V` into blocks; compute partial output for each Q-tile by iterating over K/V tiles in SRAM; never write the full `n × n` matrix.\n- HBM traffic: `O(n · d)`.\n- For seq length 8k, head dim 128: naive HBM traffic ~64MB × num_heads × num_batches; FlashAttention ~1MB × num_heads × num_batches — 60×+ less.\n- Wall clock: 2–5× faster on long sequences in practice.",
+      "follow_ups": [
+        "\"Does it reduce activation memory?\" → Yes — no need to store the attention matrix for the backward.",
+        "\"How does it interact with KV cache during decode?\" → Decode is `n × d` per step (Q is one token); the saving is mostly in the long-context prefill."
+      ],
+      "mistakes": [
+        "Saying FlashAttention is `O(n)` — it's `O(n²)` FLOPs; the win is memory traffic."
+      ],
+      "tail_label": "References",
+      "tail": "- [Dao et al. — \"FlashAttention\"](https://arxiv.org/abs/2205.14135).",
+      "short_first": "Standard prefill attention is `O(n² · d)` FLOPs and `O(n²)` HBM memory traffic for the attention matrix.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-028"
+    },
+    {
+      "question": "What's a \"circuit\" in mechanistic interpretability?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "interpretability",
+        "circuits",
+        "mech-interp"
+      ],
+      "short": "A circuit is a discoverable substructure inside a transformer — a collection of attention heads and MLP layers that, together, implement a specific computation (induction, indirect-object identification, modular arithmetic). Mechanistic interpretability tries to identify these circuits from weights and activations to explain what the model is doing in human terms. Foundational: Anthropic's transformer-circuits thread (Elhage et al. 2021; Olsson et al. 2022).",
+      "expansion": "- **The framing**: a circuit reads from the residual stream (via attention heads or MLP inputs) and writes back to it. Compose to implement higher-level capabilities.\n- **Famous circuits**:\n  - **Induction heads** (Olsson et al. 2022): two-layer attention pattern; the basis of much in-context learning.\n  - **IOI** (Wang et al. 2022, \"Interpretability in the Wild\"): indirect object identification in GPT-2.\n  - **Modular arithmetic** (Nanda et al. 2023): \"grokking\" — model goes from memorization to generalization, learning a specific algorithm (Fourier-based for mod-p addition).\n- **Methods**:\n  - **Activation patching**: swap activations between two prompts to localize causal effect.\n  - **Causal scrubbing**: hypothesize a circuit; replace activations not on the circuit with mean-ablations; verify performance is preserved.\n  - **Sparse autoencoders**: decompose residual-stream activations into a dictionary of \"features\" (Templeton et al. 2024).",
+      "follow_ups": [
+        "\"Is this useful for safety?\" → Aspirational. The hope: identify dangerous circuits (deception, reward hacking) and ablate. Currently in research.",
+        "\"What's grokking?\" → Phenomenon where a model trained on a small task suddenly transitions from memorizing to generalizing late in training (Power et al. 2022)."
+      ],
+      "mistakes": [
+        "Treating \"feature\" and \"circuit\" as synonyms — features are scalar properties; circuits are computational sub-structures."
+      ],
+      "tail_label": "References",
+      "tail": "- [Elhage et al. — \"Mathematical Framework for Transformer Circuits\"](https://transformer-circuits.pub/2021/framework/index.html).\n- [Wang et al. — \"Interpretability in the Wild\"](https://arxiv.org/abs/2211.00593).\n- [Templeton et al. — \"Scaling Monosemanticity\"](https://transformer-circuits.pub/2024/scaling-monosemanticity/).",
+      "short_first": "A circuit is a discoverable substructure inside a transformer — a collection of attention heads and MLP layers that, together, implement a specific computation (induction, indirect-object identification, modular arithmetic).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-029"
+    },
+    {
+      "question": "What's the difference between encoder-only and decoder-only embeddings?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "embeddings",
+        "encoder",
+        "decoder"
+      ],
+      "short": "**Encoder-only** (BERT-style): bidirectional attention; pretrained on MLM; pooled output (CLS token or mean-pool) gives a sentence/passage embedding. **Decoder-only** (GPT-style): causal attention; pretrained on next-token prediction; final-token hidden state can be used as an embedding, but typically you use a separate instruction-tuned wrapper or a contrastive fine-tune. Encoder embeddings are typically *better* per unit compute for retrieval; decoder embeddings catch up at large scale.",
+      "expansion": "- **Encoder embeddings** (BERT, RoBERTa, ModernBERT, BGE, E5):\n  - Bidirectional context: every token sees every other token.\n  - Better at sentence-level semantic compression for the same parameter count.\n  - Standard for retrieval (SBERT, BGE, E5).\n- **Decoder embeddings**:\n  - Causal — each token only sees its past.\n  - Can extract from final hidden state or pool over the sequence.\n  - **Instruction-tuned variants** (E5-Mistral, Mistral-based embeddings): take a strong decoder, fine-tune with contrastive loss; competitive on MTEB.\n- **Why encoder is \"naturally better\"**:\n  - Bidirectionality lets the embedding integrate context from both sides.\n  - Trained objective (MLM) is closer to \"produce a representation that captures meaning.\"\n- **Why decoder catches up at scale**:\n  - Better base models (general-purpose strength).\n  - Instruction-tuned via contrastive loss specifically for retrieval.",
+      "follow_ups": [
+        "\"Can you use a decoder LLM directly without fine-tune as an embedding?\" → Yes, but it's weaker than dedicated retrievers; the next-token-prediction objective doesn't optimize for sentence-level meaning.",
+        "\"ModernBERT vs LLM-based embedding?\" → ModernBERT is cheap and strong; LLM-embedding is more expensive but tops MTEB."
+      ],
+      "mistakes": [
+        "Treating any model's final-token hidden state as a good embedding without verification."
+      ],
+      "tail_label": "References",
+      "tail": "- [Wang et al. — \"E5-Mistral\"](https://arxiv.org/abs/2401.00368) — decoder-based instruction-tuned embedding.\n- [Warner et al. — \"ModernBERT\"](https://arxiv.org/abs/2412.13663).",
+      "short_first": "**Encoder-only** (BERT-style): bidirectional attention; pretrained on MLM; pooled output (CLS token or mean-pool) gives a sentence/passage embedding.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-030"
+    },
+    {
+      "question": "How does causal masking interact with batched / variable-length sequences?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "causal-mask",
+        "batching",
+        "packing"
+      ],
+      "short": "In a batch of variable-length sequences, you have to combine causal masking (no future) with padding-masking (no attention to pad tokens). The naive approach pads to max length and applies both masks. Better: **sequence packing** — concatenate multiple short sequences into one long sequence with per-sequence attention boundaries enforced by a block-diagonal mask. Eliminates padding waste; common in modern LLM training (e.g. Llama 3).",
+      "expansion": "- **Naive batching**: pad all sequences to max length; loss is masked out on pad tokens. Wastes compute on pad.\n- **Sequence packing** (Krell et al. 2021): pack as many sequences as fit in the context window; use block-diagonal attention mask to prevent cross-sequence attention.\n- The mask:\n  - Within each \"block\" (one sequence): standard causal triangle.\n  - Across blocks: completely masked.\n- Implementation: track sequence boundaries; build the block-diagonal mask; apply.\n- **Modern stacks**: FlashAttention supports variable-length / packed batches efficiently (varlen FlashAttention).",
+      "follow_ups": [
+        "\"How does packing affect loss computation?\" → Compute loss per sequence; the pad-token loss-mask still applies if you use any.",
+        "\"Why doesn't this break in attention?\" → The block-diagonal mask prevents leakage."
+      ],
+      "mistakes": [
+        "Packing without setting the cross-sequence mask — sequences contaminate each other's attention."
+      ],
+      "tail_label": "References",
+      "tail": "- [Krell et al. — \"Efficient Sequence Packing without Cross-contamination\"](https://arxiv.org/abs/2107.02027).\n- [FlashAttention varlen support](https://github.com/Dao-AILab/flash-attention).",
+      "short_first": "In a batch of variable-length sequences, you have to combine causal masking (no future) with padding-masking (no attention to pad tokens).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-031"
+    },
+    {
+      "question": "What is layer-wise learning rate decay (LLRD), and when is it useful?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "llrd",
+        "fine-tuning",
+        "transformer"
+      ],
+      "short": "LLRD applies progressively smaller learning rates to lower (closer-to-input) layers during fine-tuning. The intuition: lower layers learn generic features; higher layers learn task-specific patterns. Decaying LR by depth preserves the pretrained low-level features while allowing the head to adapt. Common in BERT fine-tuning and some LLM PEFT setups.",
+      "expansion": "- Configuration:\n  - Top layer LR: `η`.\n  - Layer `l`: LR `η · γ^(L − l)`, where `γ ∈ (0, 1)` is the decay (typical 0.9–0.95).\n- **When useful**:\n  - Small-data fine-tuning of pretrained models.\n  - Tasks where lower-layer features should be preserved.\n- **When not used**:\n  - LLM full pretraining (uniform LR across layers).\n  - LoRA (we're only training the adapters, not the base).\n- **Connection to differential learning rates**: LLRD is a specific scheduled form.",
+      "follow_ups": [
+        "\"Why does the head get the highest LR?\" → It starts random (task-specific head); needs more learning. Backbone is pretrained.",
+        "\"When does LLRD hurt?\" → When the lower layers also need to adapt (domain shift)."
+      ],
+      "mistakes": [
+        "Picking `γ` too small (lower layers frozen effectively); too large (no benefit over uniform)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Howard & Ruder — \"ULMFiT\"](https://arxiv.org/abs/1801.06146) — original differential-LR fine-tuning.",
+      "short_first": "LLRD applies progressively smaller learning rates to lower (closer-to-input) layers during fine-tuning.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-032"
+    },
+    {
+      "question": "How does temperature affect generation diversity?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "temperature",
+        "sampling",
+        "diversity"
+      ],
+      "short": "Temperature `T` divides the logits before softmax. `T < 1` sharpens the distribution (more deterministic, higher probability on top token). `T > 1` flattens (more diversity, higher probability on tail). `T → 0` is greedy. `T → ∞` is uniform. Combined with top-p/top-k, temperature controls the tradeoff between diversity and quality for the entire generation.",
+      "expansion": "- Math: `p_i = exp(z_i / T) / Σ_j exp(z_j / T)`.\n- Information-theoretic view: temperature scales the entropy of the distribution.\n- Typical settings:\n  - Code: `T = 0` (deterministic).\n  - Math/reasoning: `T = 0.2–0.7`.\n  - Creative writing: `T = 0.7–1.0`.\n  - Brainstorming / variation: `T = 1.0–1.3`.\n- **Beam search uses no temperature** (deterministic by construction).\n- Temperature does NOT change the *ranking* of tokens; just the *probability mass*.",
+      "follow_ups": [
+        "\"Why combine temperature with top-p?\" → Temperature controls how peaked the distribution is; top-p truncates the long tail. Together you get controlled diversity without long-tail noise.",
+        "\"Is `T = 0` the same as greedy?\" → Numerically: as `T → 0`, the softmax becomes one-hot at the argmax — yes."
+      ],
+      "mistakes": [
+        "Setting `T = 0` with non-greedy sampling and getting NaN (division by zero); use `T = 1e-6` or branch to greedy."
+      ],
+      "tail_label": "References",
+      "tail": "- [Ackley, Hinton, Sejnowski — \"A Learning Algorithm for Boltzmann Machines\"](https://www.cs.toronto.edu/~hinton/absps/cogscibm.pdf) — temperature in softmax.",
+      "short_first": "Temperature `T` divides the logits before softmax.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-033"
+    },
+    {
+      "question": "What is \"weight decay\" and how is it different from L2 regularization?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "weight-decay",
+        "l2",
+        "adamw"
+      ],
+      "short": "**L2 regularization**: add `λ ||θ||²` to the loss; gradient gains `2λ θ`. **Weight decay**: directly shrink weights toward zero by `θ ← (1 - η · λ_wd) · θ` on each step. For vanilla SGD they are equivalent. For adaptive optimizers (Adam), they diverge — Adam's per-parameter scaling distorts L2's effective regularization. **AdamW** (Loshchilov & Hutter 2017) decouples weight decay from the adaptive update, restoring the intended behavior.",
+      "expansion": "- **L2 in Adam**: `g ← g + λθ` then Adam step. The `λθ` term gets divided by `√v` per parameter, so parameters with small accumulated gradient get *more* regularization. Surprising and harmful.\n- **AdamW**: apply Adam step, then `θ ← θ - η · λ_wd · θ` separately. Each parameter is decayed identically (relative to its current value).\n- Empirically: AdamW with proper weight decay generalizes better than Adam-with-L2.\n- Default in modern LLM training (LLaMA, GPT-3, etc.): AdamW with `λ_wd = 0.1` typically.",
+      "follow_ups": [
+        "\"What's a sensible weight-decay value for LLM training?\" → 0.01–0.1 typical; higher for smaller models.",
+        "\"Should you weight-decay LayerNorm parameters?\" → Conventional practice is no; only the matmul weights."
+      ],
+      "mistakes": [
+        "Using \"Adam\" when you mean \"AdamW\" — the difference matters at scale."
+      ],
+      "tail_label": "References",
+      "tail": "- [Loshchilov & Hutter — \"Decoupled Weight Decay Regularization\"](https://arxiv.org/abs/1711.05101).",
+      "short_first": "**L2 regularization**: add `λ ||θ||²` to the loss; gradient gains `2λ θ`.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-034"
+    },
+    {
+      "question": "What is the role of attention sinks?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "attention-sink",
+        "streaming-llm",
+        "long-context"
+      ],
+      "short": "\"Attention sinks\" (Xiao et al. 2024, StreamingLLM) are the first few tokens of a sequence that, in trained transformers, receive a disproportionate share of attention from every layer — they act as a \"default destination\" for unused attention mass. Critical for streaming-LLM inference: if you evict the sink tokens (e.g. via a sliding window without keeping the start), perplexity blows up. Modern long-context serving keeps a small number of sink tokens + a sliding window over recent tokens.",
+      "expansion": "- Empirical observation: in trained transformers, the first 1–4 tokens receive ~20%+ of attention weight across heads, regardless of content.\n- **Why**: softmax must distribute 1.0 across the keys; if no key is a good match, the model parks attention at \"always-present\" positions. The early tokens fill this role.\n- **Implication for streaming/infinite-context**:\n  - Naive sliding-window attention (drop oldest tokens) destroys the sinks.\n  - StreamingLLM: keep the first `k` tokens + the most recent `w` tokens; performance preserved.\n- **Architectural fix**: train with explicit sink tokens (Xiao et al.); the model learns to use them properly without depending on the literal start-of-sequence.",
+      "follow_ups": [
+        "\"Why don't naive sliding-window models train this away?\" → They don't; the behavior emerges from softmax + content distribution. Has to be addressed at training or serving.",
+        "\"Connection to MoE?\" → Some MoE issues with router collapse are analogous: gradient flow biased toward default behaviors."
+      ],
+      "mistakes": [
+        "Treating sinks as a \"bug\" — they're an emergent property of softmax."
+      ],
+      "tail_label": "References",
+      "tail": "- [Xiao et al. — \"Efficient Streaming Language Models with Attention Sinks\"](https://arxiv.org/abs/2309.17453).",
+      "short_first": "\"Attention sinks\" (Xiao et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-035"
+    },
+    {
+      "question": "What's the difference between encoder cross-attention and decoder cross-attention?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "cross-attention",
+        "encoder-decoder",
+        "seq2seq"
+      ],
+      "short": "Both refer to the decoder cross-attending to the encoder's output in an encoder-decoder transformer (T5, BART, original Vaswani). The encoder doesn't have cross-attention; only its own self-attention. The decoder has: (1) masked self-attention (only past target tokens), (2) cross-attention from decoder Q to encoder K/V. The \"cross\" is the decoder pulling source information.",
+      "expansion": "- Encoder layer: self-attention (bidirectional) + FFN.\n- Decoder layer: masked self-attention + cross-attention + FFN.\n- Cross-attention: Q from the decoder's current hidden state, K/V from the encoder's output. Lets the decoder \"look at\" the source while generating.\n- **Used in**: T5, BART, original transformer (translation), Flamingo (vision-language cross-attention).\n- **Not used in decoder-only LLMs** (GPT family) — there's no separate source to cross-attend to.",
+      "follow_ups": [
+        "\"Why don't decoder-only LLMs have it?\" → They concatenate source + target in the prompt; self-attention over the whole sequence handles \"looking at the source.\"",
+        "\"Cross-attention in Flamingo?\" → Image features cross-attended from LLM layers; gives the LLM access to vision."
+      ],
+      "mistakes": [
+        "Calling self-attention \"cross-attention\" when Q and K come from the same sequence — that's still self."
+      ],
+      "tail_label": "References",
+      "tail": "- [Vaswani et al. — \"Attention Is All You Need\"](https://arxiv.org/abs/1706.03762).\n- [Alayrac et al. — \"Flamingo\"](https://arxiv.org/abs/2204.14198) — vision-language cross-attention.",
+      "short_first": "Both refer to the decoder cross-attending to the encoder's output in an encoder-decoder transformer (T5, BART, original Vaswani).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-036"
+    },
+    {
+      "question": "What is grokking?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "grokking",
+        "generalization",
+        "training-dynamics"
+      ],
+      "short": "Grokking (Power et al. 2022): a phenomenon where a model trained on a small algorithmic task (e.g. modular arithmetic) memorizes the training set quickly but generalizes only much later in training — sometimes after 100× more steps. Suggests the optimization landscape contains multiple local minima of different generalization quality; weight decay and continued training are necessary to find the generalizing one.",
+      "expansion": "- The empirical curve: training accuracy hits 100% quickly; test accuracy stays at chance for many epochs; then suddenly jumps to 100%.\n- Tasks: modular arithmetic, addition, copying patterns.\n- **Mechanistic explanation** (Nanda et al. 2023): the model first memorizes via dense circuits; weight decay slowly drives the model toward a sparse, generalizing circuit (Fourier-based for mod-p addition).\n- **Implications**:\n  - Generalization can be \"earned\" via continued training even after training loss is zero.\n  - Weight decay is important — without it, no transition.\n- **Not just a curiosity**: suggests over-parameterized models have multiple regimes, only some of which generalize.",
+      "follow_ups": [
+        "\"Does grokking happen in LLMs?\" → Not in the dramatic form; LLM pretraining is data-rich enough that the trivial-memorization minimum isn't reached.",
+        "\"Implications for fine-tuning?\" → Suggests \"train longer than you think\" on small data with weight decay can find better-generalizing solutions."
+      ],
+      "mistakes": [
+        "Conflating grokking with double descent (different phenomena)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Power et al. — \"Grokking\"](https://arxiv.org/abs/2201.02177).\n- [Nanda et al. — \"Progress measures for grokking\"](https://arxiv.org/abs/2301.05217).",
+      "short_first": "Grokking (Power et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-037"
+    },
+    {
+      "question": "What is the role of bias terms in transformers?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "bias-terms",
+        "architecture",
+        "llama"
+      ],
+      "short": "Most modern LLMs (LLaMA, Mistral) **drop bias terms** from linear layers and use bias-free LayerNorm/RMSNorm. The decision is empirical: biases add parameters and rarely improve quality at scale; some papers report mild stability gains from removing them. Original BERT/GPT-2 used biases; LLaMA-family normalized this out.",
+      "expansion": "- Linear layer: `y = Wx + b`. The `b` adds `d` parameters per layer.\n- Total bias parameters: ~`O(d · n_layers)` — small relative to weight matrices `O(d² · n_layers)`.\n- Empirical findings:\n  - At scale, biases contribute very little.\n  - Some recipes (Chinchilla, Llama) drop them.\n  - GPT-3 kept them; LLaMA dropped them.\n- RMSNorm specifically drops the bias (the `β` in LayerNorm); this is the \"RMS\" part.",
+      "follow_ups": [
+        "\"Does it affect training stability?\" → Some reports of mild improvement; not dramatic.",
+        "\"Why does the FFN still benefit from gating despite no biases?\" → SwiGLU's multiplication is fundamentally different from a bias add."
+      ],
+      "mistakes": [
+        "Calling LayerNorm \"bias-free\" — it has a bias (`β`); only RMSNorm doesn't."
+      ],
+      "tail_label": "References",
+      "tail": "- [Touvron et al. — \"LLaMA\"](https://arxiv.org/abs/2302.13971) — bias-free linears.\n- [Zhang & Sennrich — \"RMSNorm\"](https://arxiv.org/abs/1910.07467).",
+      "short_first": "Most modern LLMs (LLaMA, Mistral) **drop bias terms** from linear layers and use bias-free LayerNorm/RMSNorm.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-038"
+    },
+    {
+      "question": "What is mixed expert parallelism (expert parallelism) for MoE training?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "expert-parallel",
+        "moe",
+        "distributed"
+      ],
+      "short": "In MoE training, each expert is large enough that putting all of them on one GPU is infeasible. **Expert parallelism (EP)** distributes experts across devices: each device owns a subset of experts. Per token, routing decides which experts to call; tokens are **all-to-all** shuffled to the device hosting the chosen expert, processed, then **all-to-all** back. This adds communication overhead absent in dense training.",
+      "expansion": "- **The setup**: 64 experts; 64 GPUs; one expert per GPU.\n- **Per-batch flow**:\n  1. Forward gating: compute which expert each token routes to.\n  2. **All-to-all dispatch**: send each token to the GPU hosting its chosen expert.\n  3. Each GPU runs its expert on the received tokens.\n  4. **All-to-all combine**: send results back to the originating GPU.\n- **Communication cost**: linear in batch × token dim; significant.\n- **Combining with TP, DP, PP**:\n  - DP + EP: data-parallel replicas, each replicated across the expert pool.\n  - TP + EP: tensor-parallel within each expert, expert-parallel across experts.\n- **Load balancing**: critical to avoid expert hotspots that bottleneck the all-to-all.",
+      "follow_ups": [
+        "\"Why does MoE need fast interconnect?\" → All-to-all is communication-intensive; high-bandwidth NVLink / Infiniband matter.",
+        "\"What's expert capacity?\" → A hard cap on tokens per expert per batch; tokens beyond the cap are dropped or rerouted."
+      ],
+      "mistakes": [
+        "Treating EP as \"just another parallelism axis\" without recognizing all-to-all cost."
+      ],
+      "tail_label": "References",
+      "tail": "- [Fedus, Zoph, Shazeer — \"Switch Transformer\"](https://arxiv.org/abs/2101.03961).\n- [Lepikhin et al. — \"GShard\"](https://arxiv.org/abs/2006.16668) — expert parallelism.",
+      "short_first": "In MoE training, each expert is large enough that putting all of them on one GPU is infeasible.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-039"
+    },
+    {
+      "question": "What is the relationship between transformer FFN and a key-value memory?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "ffn",
+        "kv-memory",
+        "geva-2021"
+      ],
+      "short": "Geva et al. (2021): the transformer FFN sublayer can be interpreted as a **key-value memory**. The first matrix's rows are \"keys\" matched against the input; the activation pattern is sparse; the second matrix's columns are \"values\" associated with each key. Suggests FFN parameters encode discrete factual associations the model has learned, and modifying specific rows can edit specific facts (ROME, MEMIT).",
+      "expansion": "- The FFN: `y = W_2 σ(W_1 x)`.\n- Interpretation: `W_1` rows are \"keys\" (probe vectors), `σ(...)` is a sparse activation pattern, `W_2` columns are \"values\" (output contributions).\n- **Empirical evidence**:\n  - FFN activations are sparse (many near zero).\n  - Specific FFN rows correspond to specific factual associations (Geva et al.).\n- **ROME** (Meng et al. 2022): edit a specific fact by modifying a small subset of FFN weights at a specific layer.\n- **MEMIT** (Meng et al. 2023): scaled up — edit thousands of facts in batch.\n- **Implication**: FFN ≈ a sparse retrieval-augmented memory; attention is the routing.\n- Caveat: the picture is simplified; the model uses FFNs for more than just factual storage.",
+      "follow_ups": [
+        "\"Why does this matter for safety?\" → Suggests model editing is feasible — but also that facts can be unlearned or modified in targeted ways.",
+        "\"Connection to MoE?\" → MoE makes the key-value memory *explicit*: experts as memory shards, router as the addressing."
+      ],
+      "mistakes": [
+        "Taking the KV-memory analogy literally — the FFN is a function approximator that *also* implements memory-like behavior; not exclusively memory."
+      ],
+      "tail_label": "References",
+      "tail": "- [Geva et al. — \"Transformer Feed-Forward Layers Are Key-Value Memories\"](https://arxiv.org/abs/2012.14913).\n- [Meng et al. — \"ROME\"](https://arxiv.org/abs/2202.05262).",
+      "short_first": "Geva et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-040"
+    },
+    {
+      "question": "What is speculative decoding's correctness proof?",
+      "category": "derivation",
+      "difficulty": "senior",
+      "tags": [
+        "speculative-decoding",
+        "theory"
+      ],
+      "short": "Speculative decoding (Leviathan et al. 2023) accepts a draft token with probability `min(1, p_target/p_draft)`. If rejected, sample from a corrected distribution `(p_target − p_draft)_+ / normalizer`. This procedure is **provably unbiased** — the output distribution equals the target model's distribution exactly. The proof is a direct rejection-sampling argument.",
+      "expansion": "- Notation: `p` = target distribution; `q` = draft distribution.\n- Draft samples `t ~ q`; accept with probability `min(1, p(t)/q(t))`.\n- If accepted, output `t`.\n- If rejected, sample `t' ~ r` where `r(x) = max(0, p(x) − q(x)) / normalizer`. Output `t'`.\n- **Proof sketch**:\n  - `P(output = x) = q(x) · min(1, p(x)/q(x)) + (1 − accept_rate) · r(x)`.\n  - For `x` with `p(x) ≤ q(x)`: accepted with prob `p(x)/q(x)`; total prob `q(x) · p(x)/q(x) = p(x)`.\n  - For `x` with `p(x) > q(x)`: accepted with prob 1; total prob `q(x)`. Plus the rejected-resampling contribution.\n  - Sum: exactly `p(x)`.\n- **Why this matters**: spec-decoding doesn't change the model's output distribution. It's a pure latency optimization.",
+      "follow_ups": [
+        "\"What's the acceptance rate?\" → Depends on how well `q` approximates `p`; typical 60–90%.",
+        "\"Speedup math?\" → On average, you produce more than one token per target-forward pass. Expected speedup ≈ (1 + acceptance_rate × draft_length)."
+      ],
+      "mistakes": [
+        "Treating spec-decoding as approximate — it's exact."
+      ],
+      "tail_label": "References",
+      "tail": "- [Leviathan, Kalman, Matias — \"Fast Inference from Transformers via Speculative Decoding\"](https://arxiv.org/abs/2211.17192) — proof in §3.",
+      "short_first": "Speculative decoding (Leviathan et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-041"
+    },
+    {
+      "question": "What is parallel decoding (Jacobi / Lookahead)?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "parallel-decoding",
+        "jacobi",
+        "lookahead"
+      ],
+      "short": "Parallel decoding methods (Lookahead, Fu et al. 2024; Jacobi decoding, Santilli et al. 2023) generate multiple tokens per forward pass *without* a separate draft model. The model itself proposes the next `n` tokens; the next forward pass verifies which ones are correct (Jacobi-iteration-style). Variants: Medusa (extra heads predict future positions), EAGLE (predict features), Lookahead (N-gram caching). Speedup similar to speculative decoding without the draft model.",
+      "expansion": "- **Jacobi decoding**: iteratively refine a sequence of `n` tokens; at each iteration, the model emits new candidates for each position; converge when stable.\n- **Lookahead decoding** (Fu et al. 2024): cache N-gram patterns; predict ahead using them; verify with one forward pass.\n- **Medusa** (Cai et al. 2024): add `M` extra LM heads to the base model; each predicts a future position.\n- **EAGLE** (Li et al. 2024): predict hidden features of future positions, not tokens; better acceptance.\n- **Trade-offs vs. speculative decoding**:\n  - Pros: no separate draft model needed; simpler deployment.\n  - Cons: requires model modification (Medusa, EAGLE) or specialized algorithms; speedups can be lower.\n- **DeepSeek-V3's MTP**: trained-in version that doubles as self-speculation.",
+      "follow_ups": [
+        "\"Is Jacobi decoding lossless?\" → Yes, when converged (last iteration produces the same tokens as autoregressive).",
+        "\"When does Medusa underperform spec decoding?\" → If the extra heads aren't well-trained; the per-position accuracy directly determines speedup."
+      ],
+      "mistakes": [
+        "Conflating parallel decoding with attention parallelism (different concept)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Fu et al. — \"Lookahead Decoding\"](https://arxiv.org/abs/2402.02057).\n- [Cai et al. — \"Medusa\"](https://arxiv.org/abs/2401.10774).\n- [Li et al. — \"EAGLE\"](https://arxiv.org/abs/2401.15077).",
+      "short_first": "Parallel decoding methods (Lookahead, Fu et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-042"
+    },
+    {
+      "question": "What is the difference between encoder-decoder cross-attention KV cache and self-attention KV cache?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "kv-cache",
+        "encoder-decoder",
+        "cross-attention"
+      ],
+      "short": "Encoder-decoder models have *two* KV caches: (1) the encoder's K/V (computed once from the source, reused for every decode step; static); (2) the decoder's self-attention K/V (grows with each generated target token; dynamic). The encoder's cache doesn't grow during decode; the decoder's does. This is a different cache shape than decoder-only models.",
+      "expansion": "- **Encoder-decoder** (T5, BART, original transformer):\n  - Encoder K/V: shape `(n_layers, n_kv_heads, n_source, d_head)`. Computed once per source; constant during decode.\n  - Decoder self-attention K/V: shape `(n_layers, n_kv_heads, n_target_so_far, d_head)`. Grows by 1 per step.\n- **Decoder-only**:\n  - Single cache; shape `(n_layers, n_kv_heads, n_total, d_head)`. Prompt + generated tokens combined.\n- **Memory implication**:\n  - Encoder-decoder: encoder cache constant; decoder grows.\n  - Decoder-only: one big growing cache.\n- **Why this matters for serving**:\n  - Encoder-decoder: encoder pass amortized over many target tokens; great for \"summarize this long document\" workloads.\n  - Decoder-only: prompt caching (T4) is the equivalent — cache the prompt's KV.",
+      "follow_ups": [
+        "\"Why has decoder-only mostly won?\" → Simpler; single objective; in-context-learning is easy; serving is more uniform."
+      ],
+      "mistakes": [
+        "Treating encoder-decoder and decoder-only as having the \"same\" KV cache."
+      ],
+      "tail_label": "References",
+      "tail": "- [Vaswani et al. — \"Attention Is All You Need\"](https://arxiv.org/abs/1706.03762).\n- [Raffel et al. — \"T5\"](https://arxiv.org/abs/1910.10683).",
+      "short_first": "Encoder-decoder models have *two* KV caches: (1) the encoder's K/V (computed once from the source, reused for every decode step; static); (2) the decoder's self-attention K/V (grows with each generated target token; dynamic).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-043"
+    },
+    {
+      "question": "What is the \"lost-in-the-middle\" mitigation at the model level?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "lost-in-the-middle",
+        "long-context",
+        "training"
+      ],
+      "short": "Mitigations at training: (1) train on **synthetic needle-in-haystack data** with the relevant info at varying positions; (2) **continued long-context pretraining** with documents that have important info distributed throughout; (3) **positional encoding fixes** (RoPE → YaRN / NTK extension); (4) **explicit attention pattern training** that rewards the model for attending to relevant mid-prompt context. Mitigations at serving: order retrieved passages by reranker score; truncate hard.",
+      "expansion": "- The training fix:\n  - Liu et al. 2023 documents the problem.\n  - Models like Claude 3, Gemini 1.5/2.0, GPT-4-turbo trained with long-context data including positional-diverse important info; flatten the U-curve substantially.\n- **Synthetic data**:\n  - Needle-in-haystack data construction; train so model accuracy is high across positions.\n- **YaRN / NTK / PI**:\n  - Extends RoPE to longer context; pairs with continued pretraining on long sequences.\n- **Active research**: \"lost in the middle\" still appears in 2026 evals on real-world long-context tasks despite synthetic-NIH passing.",
+      "follow_ups": [
+        "\"How do you measure lost-in-the-middle yourself?\" → Build a needle-in-haystack at varying positions; measure accuracy curve.",
+        "\"Why is real-world lost-in-the-middle harder than synthetic?\" → Real-world long documents have many distractors; synthetic NIH is a single sentence to find."
+      ],
+      "mistakes": [
+        "Reporting needle-in-haystack accuracy as proof the model handles real long-context."
+      ],
+      "tail_label": "References",
+      "tail": "- [Liu et al. — \"Lost in the Middle\"](https://arxiv.org/abs/2307.03172).\n- [Peng et al. — \"YaRN\"](https://arxiv.org/abs/2309.00071).",
+      "short_first": "Mitigations at training: (1) train on **synthetic needle-in-haystack data** with the relevant info at varying positions; (2) **continued long-context pretraining** with documents that have important info distributed throughout; (3) **positional encoding fixes** (RoPE → YaRN / NTK extension); (4) **explicit attention pattern training** that rewards the model for attending to relevant mid-prompt context.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-044"
+    },
+    {
+      "question": "Compare GPT, BERT, T5 architectures briefly.",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "gpt",
+        "bert",
+        "t5",
+        "comparison"
+      ],
+      "short": "**GPT**: decoder-only; causal self-attention; pretrained on next-token prediction; great for generation. **BERT**: encoder-only; bidirectional self-attention; pretrained on masked LM + next-sentence prediction; great for understanding tasks. **T5**: encoder-decoder; bidirectional encoder, causal decoder with cross-attention; pretrained on span-corruption; treats all tasks as text-to-text. Modern: decoder-only (GPT-style) has won general-purpose; encoder-only persists for embeddings/classification; encoder-decoder is niche.",
+      "expansion": "- **GPT family** (Radford et al. 2018+):\n  - Decoder-only with causal mask.\n  - Pretrained: predict next token.\n  - Scale: 117M (GPT) → 175B (GPT-3) → 1.8T+ (GPT-4-class est.).\n- **BERT** (Devlin et al. 2018):\n  - Encoder-only with bidirectional attention.\n  - Pretrained: masked LM (mask 15% of tokens, predict).\n  - Plus NSP (next-sentence prediction); later models (RoBERTa) drop NSP.\n- **T5** (Raffel et al. 2019):\n  - Encoder-decoder.\n  - Span corruption: mask consecutive spans; predict them sequentially.\n  - \"Text-to-text\" framing: every task is \"input text → output text\".\n- **Why decoder-only won**:\n  - Single objective (next-token) handles everything via prompting.\n  - In-context learning falls out.\n  - Serving is uniform.\n  - Scaling laws hold cleanly.",
+      "follow_ups": [
+        "\"Why does BERT use [CLS]?\" → A dedicated token whose final embedding is the sentence-level representation for downstream tasks.",
+        "\"T5's 'unified' framing?\" → Cast classification as \"predict the label string\"; cast translation as text-to-text; etc."
+      ],
+      "mistakes": [
+        "Saying GPT uses bidirectional attention."
+      ],
+      "tail_label": "References",
+      "tail": "- [Devlin et al. — \"BERT\"](https://arxiv.org/abs/1810.04805).\n- [Radford et al. — GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf).\n- [Raffel et al. — \"T5\"](https://arxiv.org/abs/1910.10683).",
+      "short_first": "**GPT**: decoder-only; causal self-attention; pretrained on next-token prediction; great for generation.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-045"
+    },
+    {
+      "question": "What is \"model surgery\" and when is it done?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "model-surgery",
+        "weight-edit",
+        "expansion"
+      ],
+      "short": "Model surgery = manually modifying trained weights for specific outcomes: (a) **width / depth expansion** (initialize a bigger model from a smaller one's weights — \"Net2Net\" style), (b) **layer pruning** for smaller deployment, (c) **weight editing** to fix specific facts (ROME, MEMIT), (d) **merging / interpolation** of fine-tuned variants (model souping, task arithmetic). All bypass standard training; useful for cost reduction and rapid iteration.",
+      "expansion": "- **Width/depth expansion** (Chen et al. 2015, Net2Net): map a small model's weights into a larger one preserving function; continue training. Used in some warm-start regimes.\n- **Pruning** (lottery-ticket-style; structured pruning): cut weights below a threshold; fine-tune. Reduces model size for deployment.\n- **Weight editing**:\n  - **ROME** (Meng et al. 2022): locate-and-edit a single fact.\n  - **MEMIT** (Meng et al. 2023): edit thousands of facts in batch.\n  - **Task arithmetic** (Ilharco et al. 2022): `θ_pretrained + (θ_fine-tuned - θ_pretrained) = capability vector`; add/subtract these.\n- **Model souping** (Wortsman et al. 2022): average weights of multiple fine-tunes of the same base; sometimes better than any individual.",
+      "follow_ups": [
+        "\"Does model souping work in production?\" → Yes, especially across hyperparameter-different fine-tunes of the same task. Empirical risk: averaging across diverged tasks degrades.",
+        "\"Why is fact editing controversial?\" → Edits can have unintended downstream effects; not a reliable way to delete information."
+      ],
+      "mistakes": [
+        "Treating weight-edit as a substitute for fine-tuning at scale."
+      ],
+      "tail_label": "References",
+      "tail": "- [Wortsman et al. — \"Model Soups\"](https://arxiv.org/abs/2203.05482).\n- [Meng et al. — \"ROME\"](https://arxiv.org/abs/2202.05262).\n- [Ilharco et al. — \"Task Arithmetic\"](https://arxiv.org/abs/2212.04089).",
+      "short_first": "Model surgery = manually modifying trained weights for specific outcomes: (a) **width / depth expansion** (initialize a bigger model from a smaller one's weights — \"Net2Net\" style), (b) **layer pruning** for smaller deployment, (c) **weight editing** to fix specific facts (ROME, MEMIT), (d) **merging / interpolation** of fine-tuned variants (model souping, task arithmetic).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-046"
+    },
+    {
+      "question": "What's the \"ringer attention\" / \"ring attention\" idea?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "ring-attention",
+        "long-context",
+        "sequence-parallel"
+      ],
+      "short": "Ring attention (Liu et al. 2023) is a sequence-parallel technique: each GPU holds a slice of the sequence; during attention, K/V blocks rotate around a ring of GPUs, with each device computing its Q-block's attention against received K/V. Enables training on contexts longer than fit on any single device. Used in Gemini 1.5's 1M-context training; key for very-long-context LLMs.",
+      "expansion": "- **Setup**: split sequence of length `n` across `P` GPUs; each holds `n/P` query tokens (and their corresponding K/V).\n- **Algorithm**:\n  - Each GPU computes attention of its `Q` block against its local `K, V` block.\n  - Then `K, V` blocks rotate one position around the ring.\n  - GPU computes attention against the next block.\n  - Repeat `P` times — each Q block has attended over all K, V blocks.\n- **Memory**: each GPU only holds `n/P` of the sequence; total sequence can be much larger than per-device memory.\n- **Compute**: same total FLOPs as full attention; overlapped with the ring's communication.\n- **Combines with**: FlashAttention (each block's local attention is FlashAttention).",
+      "follow_ups": [
+        "\"What's the communication overhead?\" → The K/V rotation is one all-reduce/ring-shift per step. Overlapped with compute when possible.",
+        "\"Why is this for long context specifically?\" → For short sequences, full attention on one GPU is fine; ring attention pays its communication cost only when needed."
+      ],
+      "mistakes": [
+        "Confusing ring attention with ring-allreduce in DDP."
+      ],
+      "tail_label": "References",
+      "tail": "- [Liu et al. — \"Ring Attention with Blockwise Transformers for Near-Infinite Context\"](https://arxiv.org/abs/2310.01889).",
+      "short_first": "Ring attention (Liu et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-047"
+    },
+    {
+      "question": "How does autoregressive sampling actually pick a token, step by step?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "sampling",
+        "autoregressive",
+        "generation"
+      ],
+      "short": "(1) Model produces logits for the next token; (2) divide by temperature; (3) apply top-k or top-p truncation; (4) softmax to get a probability distribution; (5) sample from the multinomial. Append the sampled token to the context. Repeat until EOS or max-length. Greedy = step 5 is argmax; otherwise sample.",
+      "expansion": "- The full step-by-step:\n  1. Forward pass on current context; output logits `z ∈ ℝ^V`.\n  2. Apply repetition penalty (multiplicative on already-seen tokens).\n  3. Divide `z / T`.\n  4. Apply top-k: keep top `k` logits, set rest to `-inf`.\n  5. Apply top-p: compute softmax; cumulative; truncate where cumulative > p.\n  6. Compute final softmax over remaining tokens.\n  7. Sample (multinomial) or take argmax (greedy).\n  8. Append the sampled token; update KV cache.\n- Order of operations matters: temperature before truncation; truncation before final softmax.",
+      "follow_ups": [
+        "\"What's the difference between top-k=1 and greedy?\" → Equivalent (argmax).",
+        "\"Why apply repetition penalty before temperature?\" → Convention; results are similar either way."
+      ],
+      "mistakes": [
+        "Applying temperature *after* truncation (changes the truncation set)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Holtzman et al. — \"The Curious Case of Neural Text Degeneration\"](https://arxiv.org/abs/1904.09751) — sampling strategies.",
+      "short_first": "(1) Model produces logits for the next token; (2) divide by temperature; (3) apply top-k or top-p truncation; (4) softmax to get a probability distribution; (5) sample from the multinomial.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-048"
+    },
+    {
+      "question": "How does cross-entropy loss behave during LLM pretraining? What's a typical curve?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "pretraining",
+        "loss-curve",
+        "scaling-laws"
+      ],
+      "short": "Loss starts high (around `log(V) ≈ ln(50000) ≈ 10.8` nats per token for a random model on a 50k-vocab tokenizer), drops rapidly in the first few % of training, then slows to a power-law decay. Typical end-of-training loss for a frontier LLM: 1.8–2.2 nats per token. Loss curve on log-log axes is approximately linear, matching the scaling laws.",
+      "expansion": "- Random baseline loss: `log V` where `V` is vocab size.\n- Typical Llama-style 7B model loss at end of training: ~2.0 nats/token.\n- Perplexity = `exp(loss)`; 2.0 nats/token ≈ perplexity 7.4 per token.\n- Scaling laws (Kaplan, Chinchilla): loss vs. compute is approximately a power law.\n- **Loss spikes**: see T3 — fp16 overflow, router collapse, bad batch.\n- **Bumps**: occasionally observed when reaching new capabilities (\"learning curves with phase transitions\").",
+      "follow_ups": [
+        "\"Why is the curve approximately a power law in log-log?\" → Empirical; matches the scaling-law fits.",
+        "\"What's a reasonable LR schedule?\" → Linear warmup (few thousand steps) + cosine decay to ~10% of peak."
+      ],
+      "mistakes": [
+        "Comparing loss across different tokenizers without normalizing for vocab size."
+      ],
+      "tail_label": "References",
+      "tail": "- [Kaplan et al. — \"Scaling Laws\"](https://arxiv.org/abs/2001.08361).",
+      "short_first": "Loss starts high (around `log(V) ≈ ln(50000) ≈ 10.8` nats per token for a random model on a 50k-vocab tokenizer), drops rapidly in the first few % of training, then slows to a power-law decay.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-049"
+    },
+    {
+      "question": "What's the role of the unembedding (LM head) matrix?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "unembedding",
+        "lm-head",
+        "weight-tying"
+      ],
+      "short": "The unembedding `W ∈ ℝ^{d × V}` projects the model's final hidden state into vocabulary logits: `logits = h · W`. With weight tying (input/output sharing), `W = W_emb^T` — the same matrix serves both as token-embed and as unembed. Without tying, separate parameter.",
+      "expansion": "- **Forward**: `h_final ∈ ℝ^d` → `logits = h_final W ∈ ℝ^V` → softmax → token probabilities.\n- **With weight tying**: the same `W ∈ ℝ^{V × d}` is used for both embedding lookup and the linear projection. The token at position `i` shares its embedding-row with its unembedding-column.\n- **Without tying**: a separate parameter; doubles vocabulary parameters. Empirically, weight tying gives slightly better perplexity at lower parameter count.\n- **All modern open LLMs** use weight tying.",
+      "follow_ups": [
+        "\"How does this interact with the final LayerNorm?\" → Pre-norm transformers apply a final RMSNorm before the LM head; ensures the unembedding sees normalized features."
+      ],
+      "mistakes": [
+        "Confusing the embedding matrix with the unembedding matrix as separate entities when tied."
+      ],
+      "tail_label": "References",
+      "tail": "- [Press & Wolf — \"Using the Output Embedding to Improve LMs\"](https://arxiv.org/abs/1608.05859).",
+      "short_first": "The unembedding `W ∈ ℝ^{d × V}` projects the model's final hidden state into vocabulary logits: `logits = h · W`.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-050"
+    },
+    {
+      "question": "What is mixture-of-depths (MoD)?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "mod",
+        "conditional-compute",
+        "raposo-2024"
+      ],
+      "short": "Mixture-of-Depths (Raposo et al. 2024, DeepMind): instead of every token going through every layer, a routing network at each layer decides whether each token is \"active\" (processed) or \"skipped\" (passed through identity). Saves compute when many tokens don't need deep processing. A complementary axis to MoE (which routes between FFN experts within a layer).",
+      "expansion": "- The mechanism:\n  - At each layer, gating network predicts a score per token.\n  - Top-k tokens get processed by the layer's full computation.\n  - The rest pass through unchanged (identity).\n- **MoE vs MoD**:\n  - MoE: which *expert* processes each token within a layer.\n  - MoD: whether the *layer* processes each token at all.\n  - Orthogonal and can be combined.\n- **Benefit**: per-token compute can be much less than per-layer × n_layers.\n- **Result**: MoD models report matching dense quality at 30–50% less compute.\n- **Caveats**:\n  - Routing adds complexity.\n  - Top-k makes the operation non-differentiable in the strict sense; trained with auxiliary losses similar to MoE.",
+      "follow_ups": [
+        "\"Combining MoD with MoE?\" → Yes; the Raposo et al. paper sketches it. Active research direction.",
+        "\"Why don't all transformers use this?\" → Engineering complexity; MoE already gets most of the parameter-efficiency wins."
+      ],
+      "mistakes": [
+        "Confusing MoD with depth-wise pruning (different concept)."
+      ],
+      "tail_label": "References",
+      "tail": "- [Raposo et al. — \"Mixture-of-Depths\"](https://arxiv.org/abs/2404.02258).",
+      "short_first": "Mixture-of-Depths (Raposo et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-051"
+    },
+    {
+      "question": "What's the difference between absolute, relative, and ALiBi position encoding in terms of how they extrapolate?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "positional-encoding",
+        "extrapolation",
+        "alibi",
+        "rope"
+      ],
+      "short": "**Absolute** (sinusoidal, learned): each position is a distinct vector; extrapolation past training length is poor or impossible. **Relative** (Shaw / T5 bias): encodes pairwise differences; extrapolates only if the relative bias function is well-defined for unseen differences. **ALiBi**: linear penalty proportional to position difference; extrapolates \"for free\" — no new parameters needed for longer contexts. **RoPE**: rotation-based; extrapolates poorly out-of-the-box but extends well with PI/YaRN/NTK adjustments.",
+      "expansion": "- **Sinusoidal**: claimed extrapolation in Vaswani 2017 but empirically poor — model perplexity degrades quickly past training length.\n- **Learned absolute** (BERT): zero extrapolation — positions past training are completely unseen.\n- **Relative T5 bias**: extrapolates if you've trained the bias matrix to cover the new differences; bounded by training-time max difference.\n- **ALiBi**: `−m · |i − j|` added to attention scores; the linear function generalizes to any difference. Best out-of-the-box extrapolation; the original paper showed model trained on 1k extrapolates to 2k+.\n- **RoPE**: rotates each Q, K vector by an angle proportional to position; the *dot product* depends only on the difference. But the rotation angles for unseen positions land outside the model's trained range; needs PI/YaRN to fix.\n- **Modern preference**: RoPE + YaRN/PI dominates frontier models despite the extrapolation friction; ALiBi is used in some niches (MPT, BLOOM).",
+      "follow_ups": [
+        "\"Why did RoPE win over ALiBi?\" → Empirically, RoPE has better in-training quality (perplexity), and the extension methods (PI, YaRN) preserve quality at extended lengths.",
+        "\"ALiBi's `m` per head?\" → Pre-determined geometric sequence per head; no learned parameters."
+      ],
+      "mistakes": [
+        "Assuming RoPE extrapolates naturally — it doesn't without help."
+      ],
+      "tail_label": "References",
+      "tail": "- [Press et al. — \"ALiBi\"](https://arxiv.org/abs/2108.12409).\n- [Su et al. — \"RoPE\"](https://arxiv.org/abs/2104.09864).\n- [Peng et al. — \"YaRN\"](https://arxiv.org/abs/2309.00071).",
+      "short_first": "**Absolute** (sinusoidal, learned): each position is a distinct vector; extrapolation past training length is poor or impossible.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-052"
+    },
+    {
+      "question": "How does an LLM handle whitespace and special tokens?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "tokenization",
+        "whitespace",
+        "special-tokens"
+      ],
+      "short": "Whitespace is a *first-class* part of token IDs for most LLM tokenizers (BPE byte-level). `\"hello\"` and `\" hello\"` are different tokens. Special tokens (`<|endoftext|>`, `<|im_start|>`, `<system>`) are dedicated vocabulary entries with reserved IDs the user can't accidentally produce. Modern chat templates (Anthropic, OpenAI, Llama 3) heavily rely on special tokens to delineate turns.",
+      "expansion": "- **Whitespace tokens**: BPE merges include leading-space-tokens. `\" the\"` is a different token than `\"the\"`. Critical for round-tripping text.\n- **Special tokens**:\n  - `<bos>`, `<eos>`: beginning/end of sequence.\n  - `<|im_start|>`, `<|im_end|>`: ChatML format.\n  - `<|user|>`, `<|assistant|>`, `<|system|>`: role markers.\n  - Tool-call boundary tokens.\n- **Chat templates**: each model has its own; LLaMA 3 has a different template than Mistral. The library `transformers` provides `apply_chat_template()`.\n- **Why special tokens matter**:\n  - Provide a parseable boundary that doesn't conflict with user input.\n  - Train the model to respect them (e.g. never emit a system-role token in the middle of an assistant turn).\n- **Failure mode**: user includes a special token in their input (intentional or otherwise); the model interprets it as a structural marker. Modern APIs strip these.",
+      "follow_ups": [
+        "\"Why does spacing in prompts matter?\" → Token boundaries differ; `\"Q: 5+3 = \"` vs. `\"Q: 5 + 3 = \"` tokenize differently and yield different generations.",
+        "\"What's a chat template?\" → A structured format wrapping (role, content) into the model's expected token sequence."
+      ],
+      "mistakes": [
+        "Stripping whitespace before tokenization — usually breaks the expected format."
+      ],
+      "tail_label": "References",
+      "tail": "- [HuggingFace Chat Templates](https://huggingface.co/docs/transformers/main/en/chat_templating).\n- [OpenAI tiktoken](https://github.com/openai/tiktoken).",
+      "short_first": "Whitespace is a *first-class* part of token IDs for most LLM tokenizers (BPE byte-level).",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-053"
+    },
+    {
+      "question": "What does \"next-token prediction\" actually optimize?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "pretraining",
+        "autoregressive",
+        "objective"
+      ],
+      "short": "Minimize the negative log-likelihood `−Σ_t log p(x_t | x_<t)` over a corpus. Equivalently, minimize cross-entropy between the model's predicted distribution and the empirical token distribution. The objective is dense (one signal per token), self-supervised (no labels needed), and produces an *autoregressive* model — at inference, you sample tokens one at a time conditioned on the history.",
+      "expansion": "- The autoregressive factorization: `p(x_1, ..., x_n) = Π p(x_t | x_<t)`.\n- Loss: `−Σ_t log p(x_t | x_<t)` summed over the training corpus.\n- **Why next-token works as a pretraining objective**:\n  - Dense: every position is a training example.\n  - Self-supervised: the labels are the inputs themselves (just shifted by one).\n  - Universal: predicting the next token captures syntax, semantics, world knowledge, reasoning patterns.\n- **The \"next-token prediction is all you need\" insight**: Brown et al. 2020 demonstrated that scale + this objective gives in-context learning, zero-shot capability, etc.\n- **Limits**:\n  - Pure next-token doesn't directly optimize for instruction-following (hence SFT).\n  - Doesn't optimize for helpfulness or safety (hence RLHF / DPO).",
+      "follow_ups": [
+        "\"Why is this called 'self-supervised'?\" → No human labels — the labels are derived from the data itself.",
+        "\"What's perplexity?\" → `exp(cross-entropy loss)`; geometric mean of `1/p(token)` over the data."
+      ],
+      "mistakes": [
+        "Treating next-token prediction as just imitation — it's a deep enough objective that capabilities emerge."
+      ],
+      "tail_label": "References",
+      "tail": "- [Brown et al. — GPT-3](https://arxiv.org/abs/2005.14165).\n- [Bengio et al. — \"A Neural Probabilistic Language Model\"](https://www.jmlr.org/papers/v3/bengio03a.html) — early autoregressive LM.",
+      "short_first": "Minimize the negative log-likelihood `−Σ_t log p(x_t | x_<t)` over a corpus.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-054"
+    },
+    {
+      "question": "How does a transformer encode order if attention is permutation-equivariant?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "permutation-equivariance",
+        "positional-encoding"
+      ],
+      "short": "Self-attention with no positional encoding is permutation-equivariant: shuffling the input tokens produces the same shuffled output. To break this symmetry — so the model \"knows\" order — you add positional information: sinusoidal/learned absolute embeddings (added to token embeddings), relative bias (added to attention scores), or RoPE (rotates Q, K by position-dependent angles). Without one of these mechanisms, the model treats input as a bag of tokens.",
+      "expansion": "- Permutation equivariance: `Attn(σ(X)) = σ(Attn(X))` for any permutation `σ` of token positions.\n- The model has no way to distinguish \"the dog bit the man\" from \"the man bit the dog\" without positional info.\n- **All transformer architectures add positional encoding** in some form:\n  - Sinusoidal (original).\n  - Learned absolute (BERT).\n  - Relative bias (T5, Shaw et al.).\n  - RoPE (LLaMA, Mistral, Qwen).\n  - ALiBi (MPT, BLOOM).",
+      "follow_ups": [
+        "\"What about LSTMs / RNNs?\" → They have inherent order via the recurrence.",
+        "\"Bag-of-words baseline?\" → If you set positional encoding to zero, the transformer is approximately a bag-of-words model."
+      ],
+      "mistakes": [
+        "Forgetting that attention itself is permutation-invariant — the embedding lookup is the only place \"the\" enters; without position, every \"the\" in the input is identical."
+      ],
+      "tail_label": "References",
+      "tail": "- [Vaswani et al. — \"Attention Is All You Need\"](https://arxiv.org/abs/1706.03762).",
+      "short_first": "Self-attention with no positional encoding is permutation-equivariant: shuffling the input tokens produces the same shuffled output.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-055"
+    },
+    {
+      "question": "What is \"embedding shrinkage\" / Matryoshka representation learning?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "matryoshka",
+        "embeddings",
+        "dimensionality"
+      ],
+      "short": "Matryoshka Representation Learning (Kusupati et al. 2022): train an embedding model so that the first `k` dimensions are themselves usable embeddings, with quality degrading gracefully as `k` shrinks. The result: one embedding model produces nested embeddings at multiple dimensionalities — you pick `k` based on your storage/compute budget. Used in OpenAI text-embedding-3 (which supports \"shortening\" embeddings).",
+      "expansion": "- The training trick: aggregate the loss across multiple prefix lengths of the embedding. The first 128 dims must be useful; the first 256 even more useful; the full 1536 best.\n- **Why it matters**:\n  - Storage: smaller embeddings = less ANN-index memory.\n  - Latency: shorter dot products in retrieval.\n  - Single model serves multiple deployment configurations.\n- **At inference**: just truncate the embedding to the desired dimensionality.\n- **Trade-off**: minor quality drop at smaller `k`; ~95% quality at 50% dims is typical.",
+      "follow_ups": [
+        "\"Why not just train multiple embedding models at different sizes?\" → Cost; one model is easier to maintain.",
+        "\"Connection to PCA?\" → Different mechanism but similar shape: progressively-truncated dimensions, with the first few carrying most information."
+      ],
+      "mistakes": [
+        "Truncating non-Matryoshka embeddings and expecting graceful degradation — they're not trained for it; quality drops sharply."
+      ],
+      "tail_label": "References",
+      "tail": "- [Kusupati et al. — \"Matryoshka Representation Learning\"](https://arxiv.org/abs/2205.13147).\n- [OpenAI text-embedding-3 announcement](https://openai.com/index/new-embedding-models-and-api-updates/).",
+      "short_first": "Matryoshka Representation Learning (Kusupati et al.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-056"
+    },
+    {
+      "question": "How does temperature scaling at inference relate to RLHF's KL penalty?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "temperature",
+        "kl",
+        "rlhf",
+        "sampling"
+      ],
+      "short": "RLHF's KL penalty `β · KL(π || π_ref)` constrains how far the trained policy can drift from the reference. Inference-time temperature `T` controls how peaked the sampled distribution is. They affect different things — the KL penalty shapes *what the model knows*; temperature shapes *how it samples*. A small `β` lets the policy diverge sharply; a small `T` makes inference more deterministic regardless of `β`. Both are levers for the \"creativity vs. quality\" tradeoff but at different layers.",
+      "expansion": "- **KL penalty**: training-time. `R(s) = r(s) − β · KL(π(·|x) || π_ref(·|x))`. Drives policy toward the reference where reward signal is weak.\n- **Inference temperature**: `p_i = exp(z_i/T) / Σ exp(z_j/T)`. Shapes the sampling distribution at decode time.\n- **Combined effect**:\n  - Low `β` + high T: model trained to be opinionated, samples diversely.\n  - High `β` + low T: model close to reference, samples greedily.\n- **The \"DPO β\"** in the DPO loss is analogous to the KL penalty β; controls how aggressively the policy moves from reference.",
+      "follow_ups": [
+        "\"Can you use temperature 0 with high-β-trained policy?\" → Yes; the deterministic mode is the policy's argmax."
+      ],
+      "mistakes": [
+        "Conflating training-time and inference-time temperature scaling."
+      ],
+      "tail_label": "References",
+      "tail": "- [Ouyang et al. — \"InstructGPT\"](https://arxiv.org/abs/2203.02155) — KL penalty.\n- [Rafailov et al. — \"DPO\"](https://arxiv.org/abs/2305.18290) — DPO β.",
+      "short_first": "RLHF's KL penalty `β · KL(π || π_ref)` constrains how far the trained policy can drift from the reference.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-057"
+    },
+    {
+      "question": "What is the \"compute-equivalent\" comparison for MoE vs. dense models?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "moe",
+        "compute-equivalent",
+        "scaling"
+      ],
+      "short": "\"Compute-equivalent\" MoE comparison fixes either training compute or inference compute and compares quality. Mixtral 8x7B has ~13B active params at inference (≈ compute-equivalent to 13B dense); but at training time it's closer to a 47B-total compute footprint. The right \"compute-equivalent dense model\" depends on whether you're optimizing for training cost (compare to ~25B-class dense) or inference cost (compare to ~13B-class dense). Frontier-lab papers carefully delineate which axis.",
+      "expansion": "- **MoE economic argument**:\n  - Total params: large (capacity).\n  - Active params: small (per-token inference compute).\n  - Decouples capacity and compute.\n- **Comparison challenge**: should we compare a 47B-total/13B-active MoE to a 13B dense or 47B dense?\n- **Answer**: depends on what cost you're measuring:\n  - **Inference $/Mtok**: compare to dense with similar *active* params.\n  - **Training cost**: compare to dense with similar *training* FLOPs (somewhere between).\n- **Empirical**: Mixtral 8x7B beats Llama 2 70B on most benchmarks — substantial win on the active-param-equivalent axis.\n- **What papers should report**: both axes (Mixtral does this).",
+      "follow_ups": [
+        "\"Why is MoE training compute closer to total params than active?\" → Routing + all-to-all + load balancing add overhead; training requires the full model to be in memory."
+      ],
+      "mistakes": [
+        "Reporting only the active-params number; misleads on training cost."
+      ],
+      "tail_label": "References",
+      "tail": "- [Jiang et al. — \"Mixtral\"](https://arxiv.org/abs/2401.04088).\n- [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437).",
+      "short_first": "\"Compute-equivalent\" MoE comparison fixes either training compute or inference compute and compares quality.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-058"
+    },
+    {
+      "question": "What is the \"scaling brain\" / scaling-laws-second-order pattern from the BC / scaling-laws literature?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "scaling-laws",
+        "biological-comparison",
+        "deep-learning"
+      ],
+      "short": "A speculative but recurring observation in scaling-laws literature: LLM loss vs. compute follows a power-law (Kaplan, Chinchilla); the exponents and crossover points are surprisingly similar across model classes (text, vision, multimodal) and even across animal-brain scales of dataset and parameter sizes. The pattern motivates \"scaling is mostly about training efficiency\" rather than architecture revolutions.",
+      "expansion": "- Multiple scaling-laws papers (Kaplan, Henighan, Hoffmann, Hoffmann revised, OpenAI's \"scaling laws for autoregressive generative modeling\") show similar shapes.\n- **Implication**: architecture choices (within reasonable variants) matter less than picking the right data/compute mix.\n- **Caveats**:\n  - Not every architecture follows the same exponents (Mamba's scaling is different in some regimes).\n  - The data quality dimension is harder to model.",
+      "follow_ups": [
+        "\"Are MoE scaling laws different?\" → Yes, the active-params vs. total-params dimension complicates things. DeepSeek-V3 paper has updated MoE-specific scaling fits."
+      ],
+      "mistakes": [
+        "Citing one scaling-laws paper as definitive — they revise each other regularly."
+      ],
+      "tail_label": "References",
+      "tail": "- [Kaplan et al. — \"Scaling Laws\"](https://arxiv.org/abs/2001.08361).\n- [Hoffmann et al. — \"Chinchilla\"](https://arxiv.org/abs/2203.15556).",
+      "short_first": "A speculative but recurring observation in scaling-laws literature: LLM loss vs.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-059"
+    },
+    {
+      "question": "How do you handle very small vocabulary (e.g. a domain-specific tokenizer)?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "tokenizer",
+        "vocabulary",
+        "domain"
+      ],
+      "short": "Smaller vocab (a few thousand tokens) cuts the embedding table and LM head substantially but produces longer token sequences for the same text. Trade-off: vocab size × hidden_dim is a constant cost; sequence length is the per-input cost. For specialized domains (code, protein, music), domain-specific tokenizers (smaller vocab, more efficient for that domain) often win. For general purpose, large vocab (50k–200k) is standard.",
+      "expansion": "- **Vocab size tradeoff**:\n  - Large vocab: shorter sequences per piece of text; bigger embedding table + LM head.\n  - Small vocab: longer sequences; smaller embedding/LM head.\n- **Memory math**:\n  - Embedding params: `V · d` (50k × 4096 ≈ 200M for a 7B model).\n  - LM head: same (often tied).\n- **Specialized examples**:\n  - Code tokenizers (Code Llama, DeepSeek-Coder): vocab tuned to code patterns; better compression for code.\n  - Protein LMs: small alphabet (~25 amino acids); character-level tokenization.\n- **Tiktoken (GPT-4)**: 100k vocab; well-tuned for English and code.",
+      "follow_ups": [
+        "\"Why don't we just use byte-level always?\" → Sequence becomes very long; attention is quadratic. Subword balances expressiveness with sequence cost.",
+        "\"Can you swap a tokenizer post-pretraining?\" → Painfully; the embedding table is conditioned on the original."
+      ],
+      "mistakes": [
+        "Reporting \"tokens\" without specifying which tokenizer."
+      ],
+      "tail_label": "References",
+      "tail": "- [Sennrich et al. — BPE](https://arxiv.org/abs/1508.07909).\n- [DeepSeek-Coder paper](https://arxiv.org/abs/2401.14196).",
+      "short_first": "Smaller vocab (a few thousand tokens) cuts the embedding table and LM head substantially but produces longer token sequences for the same text.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-060"
+    },
+    {
+      "question": "What's the structural difference between FlashAttention v1, v2, v3?",
+      "category": "concept",
+      "difficulty": "senior",
+      "tags": [
+        "flashattention",
+        "kernel",
+        "hopper"
+      ],
+      "short": "**v1** (Dao 2022): introduced the IO-aware tiled-softmax algorithm; reduces HBM traffic dramatically. **v2** (Dao 2023): improved parallelization — splits work across attention heads and sequence positions more efficiently; ~2× faster than v1. **v3** (Shah et al. 2024): Hopper-specific — uses async warp specialization, FP8 attention, ping-pong scheduling to leverage H100 features. Algorithm is the same as v1; v2 and v3 are GPU-architecture-optimized rewrites.",
+      "expansion": "- **v1**: tile Q, K, V; compute attention block by block; online softmax. Saves the `n × n` HBM materialization.\n- **v2 improvements**:\n  - Parallelize the inner loop across query positions (v1 was sequential).\n  - Better work distribution across thread blocks.\n  - ~2× wall-clock improvement on common workloads.\n- **v3 improvements**:\n  - Async warp specialization: dedicate warps to specific tasks (load, compute, store) in parallel.\n  - FP8 attention: take advantage of Hopper's FP8 tensor cores; further speed gain at acceptable accuracy.\n  - Targeted at H100 / H200 specifically.\n- **Compatibility**:\n  - v1 / v2: Ampere (A100) and beyond.\n  - v3: Hopper (H100) and beyond.\n- PyTorch 2.x's `scaled_dot_product_attention` dispatches to the best available backend.",
+      "follow_ups": [
+        "\"What's the v2 improvement story for backward?\" → Better work distribution there too; recomputation cost is small.",
+        "\"Why does v3 specialize for Hopper?\" → New hardware features (TMA, warp specialization, FP8) only available on H100+."
+      ],
+      "mistakes": [
+        "Calling FlashAttention \"approximate\" in any version."
+      ],
+      "tail_label": "References",
+      "tail": "- [Dao et al. — \"FlashAttention\" v1](https://arxiv.org/abs/2205.14135).\n- [Dao — \"FlashAttention-2\"](https://arxiv.org/abs/2307.08691).\n- [Shah et al. — \"FlashAttention-3\"](https://arxiv.org/abs/2407.08608).",
+      "short_first": "**v1** (Dao 2022): introduced the IO-aware tiled-softmax algorithm; reduces HBM traffic dramatically.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-061"
+    },
+    {
+      "question": "What's \"context-free\" generation vs. \"constrained\" generation?",
+      "category": "concept",
+      "difficulty": "intro",
+      "tags": [
+        "generation",
+        "constrained",
+        "structured-output"
+      ],
+      "short": "**Context-free / unconstrained**: the model emits any token in the vocabulary at each step. **Constrained**: a finite-state-machine or grammar masks invalid tokens at each step (e.g. JSON-only). Constrained generation is critical for production LLM apps that need machine-parseable output (function calls, JSON, regex-conforming strings). See T4 structured-generation question.",
+      "expansion": "- Unconstrained: standard generation.\n- Constrained: at each step, set logits of grammar-invalid tokens to `-inf` before softmax.\n- The grammar can be:\n  - Regex (FSM compiled).\n  - JSON schema (a more complex FSM).\n  - Context-free grammar (more general).\n- Modern implementations: Outlines, xGrammar, lm-format-enforcer, OpenAI structured outputs.\n- Cost: per-token mask computation; with a precompiled FSM, ~1µs per step.",
+      "follow_ups": [
+        "\"Does constraining change the model's quality?\" → Yes — the model may prefer different content that doesn't satisfy the grammar; quality degradation depends on the grammar's restrictiveness.",
+        "\"How is this related to JSON-mode?\" → JSON-mode in OpenAI / Anthropic is constrained generation with a JSON-schema FSM."
+      ],
+      "mistakes": [
+        "Calling this \"prompting\" — it's a kernel-level mechanism, not a prompt."
+      ],
+      "tail_label": "References",
+      "tail": "- [Willard & Louf — \"Outlines\"](https://arxiv.org/abs/2307.09702).",
+      "short_first": "**Context-free / unconstrained**: the model emits any token in the vocabulary at each step.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-062"
+    },
+    {
+      "question": "How does the loss differ for instruction tuning vs. continued pretraining?",
+      "category": "concept",
+      "difficulty": "mid",
+      "tags": [
+        "sft",
+        "continued-pretraining",
+        "loss"
+      ],
+      "short": "Both use next-token cross-entropy. The differences: **continued pretraining** computes loss on every token in the corpus (next-token, no masking). **Instruction tuning** typically masks the loss on the prompt tokens (computes loss only on the response). Conceptually: continued pretraining adds knowledge; SFT teaches a response format and behavior.",
+      "expansion": "- **Continued pretraining**:\n  - Data: documents (no prompt/response structure).\n  - Loss: per-token CE on every token.\n  - Goal: acquire new knowledge / domain capabilities.\n- **Instruction tuning (SFT)**:\n  - Data: `(prompt, response)` pairs.\n  - Loss: per-token CE on the response tokens only (mask out prompt).\n  - Goal: teach the model to follow instructions in the desired format.\n- **Why mask the prompt**: the prompt is *input*, not output; computing loss on it would teach the model to *predict the prompt*, which is degenerate.\n- **Practical formats**: chat template — `<|user|>...<|assistant|>...`; loss starts at the `<|assistant|>` token.",
+      "follow_ups": [
+        "\"Do you ever NOT mask the prompt?\" → Some research suggests including a small loss term on the prompt can help generalization, but it's not standard.",
+        "\"Can you combine CPT and SFT?\" → Yes; common sequence: CPT for domain knowledge, then SFT for instruction-following."
+      ],
+      "mistakes": [
+        "Training SFT without prompt masking; model becomes weirdly anchored on predicting the prompt."
+      ],
+      "tail_label": "References",
+      "tail": "- [Ouyang et al. — \"InstructGPT\"](https://arxiv.org/abs/2203.02155).\n- [Wei et al. — \"FLAN\"](https://arxiv.org/abs/2109.01652).",
+      "short_first": "Both use next-token cross-entropy.",
+      "topic": "02-transformers-llm-internals",
+      "topic_num": 2,
+      "topic_title": "02 — Transformers & LLM Internals",
+      "id": "02-transformers-llm-internals-063"
     },
     {
       "question": "Walk me through the standard LLM training pipeline — pretraining → SFT → preference optimization.",
