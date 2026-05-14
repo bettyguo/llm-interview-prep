@@ -822,3 +822,1280 @@ Entries follow the [Q&A schema](../../CONTRIBUTING.md#the-qa-entry-schema).
 - [Agrawal et al. — "Sarathi-Serve"](https://arxiv.org/abs/2403.02310) — chunked prefill canonical paper.
 
 ---
+
+### Q: How does request scheduling work in LLM serving?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [scheduling, request-priority, fairness]
+
+**Short answer.** Modern LLM servers (vLLM, SGLang, TensorRT-LLM) implement a scheduler that picks at each iteration which prefills and decodes to advance. Priorities: latency-SLO requests, FIFO fairness, request size matching for cache reuse, preemption when memory tight. The scheduler decides per-step: which requests get prefill chunks, which advance decode, when to evict KV cache.
+
+**Expansion / why this is the answer.**
+- **Per-iteration decisions**:
+  - Admit new requests from the queue (if memory permits).
+  - Advance decode for in-flight requests.
+  - Advance prefill (chunked) for one or more new requests.
+  - Evict / preempt when memory pressure.
+- **Policies**:
+  - **FIFO**: simple; can starve long requests behind short ones with priority inversion.
+  - **Priority**: latency-sensitive requests get jumped ahead.
+  - **Size-aware**: cluster requests by expected length for better cache reuse.
+- **Preemption**:
+  - When memory is exhausted, swap out a low-priority request's KV cache (to CPU memory or disk); resume later.
+  - Costs the swap-out time; only used under pressure.
+
+**Common follow-ups.**
+- "How does vLLM's scheduler work?" → Iteration-level; each step picks new requests to admit + decodes to advance; prefix-cache aware.
+- "What's request batching latency?" → The added wait time for batching; tunable.
+
+**Common mistakes.**
+- Treating the scheduler as a black box; it's where serving-system performance lives.
+
+**References.**
+- [Kwon et al. — "vLLM"](https://arxiv.org/abs/2309.06180).
+- [Yu et al. — "Orca"](https://www.usenix.org/conference/osdi22/presentation/yu).
+
+---
+
+### Q: How does prefix caching share between requests in production?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [prefix-caching, kv-sharing, multi-tenant]
+
+**Short answer.** Prefix caching matches by token-id prefix: if two requests share a common starting sequence of tokens, their KV cache blocks for that prefix can be shared (copy-on-write). The match must be exact at the token-id level — minor whitespace or tokenizer differences break it. Implementation: hash each KV-cache block's token-prefix; reference-count; deallocate when no requests reference it. vLLM does this via paged-attention block tables.
+
+**Expansion / why this is the answer.**
+- The mechanism (vLLM):
+  - Hash each block of tokens (e.g. 16 tokens per block).
+  - Lookup: does any cached block have this hash?
+  - If yes: reuse the physical KV-cache block; bump ref count.
+  - If no: allocate, compute prefill.
+- **Common shared prefixes**:
+  - Long system prompts ("You are a helpful assistant. Follow these rules: ...").
+  - Few-shot examples.
+  - Conversation history within a session.
+- **Hit rate**: in production, typically 30–70% of total prefill tokens are cache hits when system prompts are large.
+- **Cost savings**: linear in the cache-hit prefill tokens.
+- **Anthropic / OpenAI** offer explicit prompt-caching APIs that expose this.
+
+**Common follow-ups.**
+- "Why must matches be exact?" → Token-ids must align; partial overlap doesn't help because KV computations depend on absolute position (post-RoPE) and exact preceding tokens.
+- "What's RadixAttention?" → SGLang's data structure: a radix tree of token prefixes; efficient when many requests share branchy prefixes (tree-of-thoughts patterns).
+
+**Common mistakes.**
+- Expecting cache hits across slightly-different prompts.
+
+**References.**
+- [Kwon et al. — "vLLM"](https://arxiv.org/abs/2309.06180).
+- [SGLang paper](https://arxiv.org/abs/2312.07104).
+
+---
+
+### Q: How do you compute LLM inference cost from first principles?
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [cost, derivation, capacity-planning]
+
+**Short answer.** Cost per million tokens = (GPU $ per hour × number of GPUs) / (tokens generated per hour). Tokens-per-hour = batch × tokens-per-second-per-request × 3600. The batch is bounded by KV-cache memory; tokens-per-second-per-request depends on model size, GPU memory bandwidth, and degree of quantization / speculative decoding. Walk through pin-down: model weight memory → KV per token → batch capacity → throughput → $/Mtok.
+
+**Expansion / why this is the answer.**
+- See also T4 cost-math entry; this is the extended derivation.
+- Decode-step time = (weight reads + KV reads) / GPU memory bandwidth.
+  - Llama 3 70B in bf16: 140 GB weights, 320 KB/token KV (GQA-8).
+  - At batch 8, context 4k: 8 × 4096 × 320 KB = 10.5 GB KV.
+  - Per decode-step memory traffic: 140 GB (weights) + 10.5 GB (KV) = ~150 GB read.
+  - H100 bandwidth 3.35 TB/s → step time ~45 ms.
+  - Decode throughput: ~22 step/s; at batch 8 = ~176 tokens/s aggregate.
+- $/Mtok math:
+  - 2× H100 cluster: $8/hr.
+  - Throughput: 176 tok/s × 3600 = 633k tok/hr.
+  - Cost: $8 / 0.633 Mtok ≈ $12.6/Mtok.
+- INT4 weights cut weight memory to 35 GB → step time ~13 ms → batch 32 fits → throughput rises sharply.
+
+**Common follow-ups.**
+- "Why does the math break at very large batch?" → Compute eventually saturates; arithmetic intensity rises above the roofline.
+- "MoE adjustment?" → Active params dominate decode; total params matter for memory.
+
+**Common mistakes.**
+- Forgetting KV memory; weights aren't the only thing read.
+
+**References.**
+- [Pope et al. — "Efficiently Scaling Transformer Inference"](https://arxiv.org/abs/2211.05102).
+
+---
+
+### Q: What is "request-level vs token-level" SLOs in LLM serving?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [slo, latency, ttft, tpot]
+
+**Short answer.** **Token-level SLOs**: time-to-first-token (TTFT) and time-per-output-token (TPOT). These describe per-request streaming experience. **Request-level SLOs**: total completion time, end-to-end latency. Token-level matters for interactive UX; request-level for batch / agent workloads. Define both; track p50/p95/p99 for each.
+
+**Expansion / why this is the answer.**
+- **TTFT**: time until the first output token. Dominated by prefill.
+  - Target: < 300 ms for interactive chat.
+- **TPOT** (or "inter-token latency"): time per subsequent token.
+  - Target: < 50 ms / token for "smooth" streaming.
+- **Total latency**: TTFT + (num_output_tokens × TPOT).
+- **Why both**:
+  - User starts seeing output at TTFT; the first impression.
+  - Streaming experience depends on TPOT.
+- **Tradeoffs**:
+  - Bigger batch → lower per-token cost but higher TPOT.
+  - Quantization → lower latency, slight quality drop.
+  - Spec decoding → much better TPOT, slightly higher TTFT.
+
+**Common follow-ups.**
+- "What's p99 TPOT target in production?" → < 100 ms typical.
+- "How does spec decoding affect TPOT?" → Variable: TPOT becomes "time per N tokens" where N is acceptance rate.
+
+**Common mistakes.**
+- Optimizing TTFT and TPOT in conflict (e.g. small batches help TTFT but hurt TPOT throughput).
+
+**References.**
+- [Anyscale — "Continuous Batching"](https://www.anyscale.com/blog/continuous-batching-llm-inference).
+
+---
+
+### Q: What's the role of CUDA Graphs in LLM inference?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [cuda-graphs, performance, decode]
+
+**Short answer.** CUDA Graphs capture a sequence of GPU operations once and replay them efficiently. For LLM decode (which repeats the same op sequence per token), CUDA Graphs eliminate the per-step CPU launch overhead — important when each step is microseconds-long (small models, single-batch decode). vLLM and TensorRT-LLM use CUDA Graphs for decode steps; not used for prefill (which has variable shapes).
+
+**Expansion / why this is the answer.**
+- **The problem**: launching a CUDA kernel has CPU overhead (~5-20 µs per kernel). If a decode step has ~100 kernels and each is short, CPU launch can be the bottleneck.
+- **CUDA Graph**: record the kernel sequence once; replay with a single launch.
+- **Best for**: decode with fixed shapes (batch size, context bucket). Multiple graphs for different shapes.
+- **Limits**:
+  - Fixed shapes required; dynamic shapes (variable context) break it.
+  - Setup cost amortized over many uses.
+- **Production**: vLLM enables CUDA Graphs for decode by default; significant speedup at small models / single requests.
+
+**Common follow-ups.**
+- "Why not use CUDA Graphs for prefill?" → Variable prompt lengths; would need many graphs per shape bucket; setup cost dominates.
+- "How does this interact with continuous batching?" → CUDA Graphs require fixed shapes per replay; continuous batching has dynamic shapes — use multi-graph buckets.
+
+**Common mistakes.**
+- Overestimating CUDA Graph benefit at large models / batches (where compute dominates anyway).
+
+**References.**
+- [NVIDIA CUDA Graphs documentation](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs).
+
+---
+
+### Q: How does INT8 vs INT4 weight-only quantization actually work?
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [int8, int4, quantization, awq]
+
+**Short answer.** Weight-only quantization: scale each weight to fit in 8 or 4 bits, store per-channel (or per-group) scales; dequantize back to bf16 at the point of matrix multiply. INT8 halves weight memory; INT4 quarters it. Activations stay in bf16. The challenge: 4 bits is so coarse that naive quantization hurts; methods like GPTQ (second-order error compensation) and AWQ (activation-aware salience preservation) restore quality.
+
+**Expansion / why this is the answer.**
+- **The math**:
+  - Per channel: `s_c = max(|w_c|) / 127` for INT8.
+  - Quantize: `q_c = round(w_c / s_c)`.
+  - Dequantize: `w_c ≈ s_c · q_c`.
+- **Granularity**:
+  - Per-tensor: one scale for the whole matrix; cheapest, lowest quality.
+  - Per-channel: one scale per output channel; standard.
+  - Per-group: one scale per group of N input dims (e.g. N=128); finer; used in AWQ/GPTQ.
+- **GPTQ**: minimizes weight reconstruction error using the Hessian (inverse covariance of activations); needs calibration data.
+- **AWQ**: protect salient channels (those with large activation magnitudes) by giving them lower-quantization-error treatment; needs calibration data.
+- **INT4 quality**:
+  - Typical: 0.5–1.5 pt drop on MMLU at 70B; larger drop at 7B.
+
+**Common follow-ups.**
+- "Why not INT2 or INT1?" → Quality drops sharply at <4 bits; some research (BitNet) explores it, but production rarely.
+- "Symmetric vs asymmetric quantization?" → Asymmetric (zero-point ≠ 0) is more general; symmetric is simpler and common for weights.
+
+**Common mistakes.**
+- Quantizing all weights including embeddings (often kept higher precision).
+
+**References.**
+- [Frantar et al. — "GPTQ"](https://arxiv.org/abs/2210.17323).
+- [Lin et al. — "AWQ"](https://arxiv.org/abs/2306.00978).
+
+---
+
+### Q: What is BitNet / 1.58-bit quantization?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [bitnet, extreme-quantization, 1.58-bit]
+
+**Short answer.** BitNet b1.58 (Ma et al. 2024): weights restricted to {-1, 0, +1}, giving log₂(3) ≈ 1.58 bits per weight. The matmul becomes integer addition (no multiplies). Quality competitive with bf16 at the same parameter count (according to the paper) at certain scales, with dramatically lower memory and compute. Research-stage as of 2024–2026; not yet a production default.
+
+**Expansion / why this is the answer.**
+- **The idea**:
+  - Quantize each weight to {-1, 0, +1}.
+  - Matmul becomes integer addition: weighted sum of activations (where the weight is just a sign + skip).
+  - Compute can use specialized hardware (BitNet-aware kernels).
+- **Memory**: 1.58 bits/weight vs. 16 (bf16) = ~10× smaller weight memory.
+- **Compute**: addition is much cheaper than multiplication.
+- **Result claim**: BitNet b1.58 matches bf16 LLaMA quality at the same scale.
+- **Caveats**:
+  - Trained from scratch with BitNet's specific recipe; not a post-training quantization.
+  - At larger scale (>100B), behavior is less validated.
+  - Hardware support is custom; commodity GPUs don't have BitNet-specific kernels yet.
+
+**Common follow-ups.**
+- "How is this different from binary weight networks?" → Earlier binary nets used {-1, +1}; BitNet b1.58 adds 0, which empirically matters a lot.
+- "Hardware implication?" → Custom inference accelerators benefit hugely; current GPUs less so.
+
+**Common mistakes.**
+- Treating BitNet as a drop-in replacement for bf16; it requires retraining.
+
+**References.**
+- [Ma et al. — "BitNet b1.58"](https://arxiv.org/abs/2402.17764).
+
+---
+
+### Q: What is page-eviction policy in paged attention?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [paged-attention, eviction, memory-pressure]
+
+**Short answer.** When the KV-cache memory is full and a new request needs blocks, the scheduler must evict an existing request's blocks. Common policies: **preempt** (evict the latest-arrived or lowest-priority request; swap its blocks to CPU memory; restart later); **terminate** (rare; abort the request); **partial eviction** (least-recently-used blocks). vLLM and similar use preempt-and-swap; rarely terminate.
+
+**Expansion / why this is the answer.**
+- **The decision**: which request to victim?
+  - **FIFO of arrival**: evict latest; arrivals farthest from completion.
+  - **Priority**: evict lowest-priority.
+  - **LIFO** with low-priority requests at the back.
+- **What to do with the evicted request**:
+  - **Swap to CPU**: copy KV blocks to host memory; reload later. Costs swap time.
+  - **Discard and restart**: lose the KV; recompute from scratch.
+- **Trigger**: memory utilization threshold (e.g. 95% full).
+- **Cost**: swapping a request's KV is `O(seq_len × d)` bytes over PCIe; can be hundreds of MB.
+- **Production**: vLLM swaps low-priority requests; rarely discards.
+
+**Common follow-ups.**
+- "What's the swap rate in production?" → Workload-dependent; some systems target <1%.
+- "Why does discard-and-restart sometimes win?" → If the request's prompt was short, recomputing is cheap; saves the PCIe swap.
+
+**Common mistakes.**
+- Treating eviction as rare; under load it's continuous.
+
+**References.**
+- [Kwon et al. — "vLLM"](https://arxiv.org/abs/2309.06180).
+
+---
+
+### Q: How do you serve LLMs at the edge (mobile, on-device)?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [edge, on-device, llama-cpp, gguf]
+
+**Short answer.** Edge LLM serving needs aggressive quantization (INT4/Q4_0 at minimum), small models (1–8B typical), and runtimes optimized for CPU/GPU on consumer hardware. **llama.cpp** (CPU-first, GGUF format) is the canonical OSS choice; **Core ML / MLX** on Apple; **ONNX Runtime** on Windows. Tradeoffs: latency vs. cost vs. privacy. Modern edge models: Phi-3-mini, Gemma 2B, Llama 3.2 1B/3B.
+
+**Expansion / why this is the answer.**
+- **Targets**:
+  - Mobile (phones).
+  - Laptops (Apple Silicon, CPU).
+  - Embedded (IoT, edge devices).
+- **Constraints**:
+  - **Memory**: 4–16 GB typical; INT4 quantization brings 7B into this budget.
+  - **Compute**: limited; no NVIDIA-class GPU.
+  - **Power**: battery and thermal limits.
+- **Runtimes**:
+  - **llama.cpp**: CPU-first; supports CUDA, Metal, ROCm backends; GGUF model format.
+  - **MLX**: Apple's native ML framework for Apple Silicon.
+  - **Core ML**: Apple's mobile inference.
+  - **ONNX Runtime**: cross-platform.
+  - **Mistral.rs / candle**: Rust-based, very fast on CPU.
+- **Edge models**:
+  - Phi-3-mini (3.8B): designed for on-device.
+  - Gemma 2B / Llama 3.2 1B/3B: small enough to run on a phone with INT4.
+- **Quality vs cloud**: meaningful gap; edge models are weaker than 7B+ cloud LLMs.
+
+**Common follow-ups.**
+- "Why use on-device LLMs?" → Privacy, offline use, latency.
+- "GGUF vs other formats?" → llama.cpp's quantization-friendly binary format; ubiquitous in OSS edge LLM ecosystem.
+
+**Common mistakes.**
+- Assuming edge models match cloud quality; they don't.
+
+**References.**
+- [llama.cpp project](https://github.com/ggerganov/llama.cpp).
+- [Apple MLX](https://github.com/ml-explore/mlx).
+
+---
+
+### Q: What is "Continuous Batching" specifically (vs. naive batching)?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [continuous-batching, in-flight-batching]
+
+**Short answer.** Already covered in T4 base; specific contrast: **naive batching** waits for the slowest request in a batch to finish before starting a new batch — GPU idle for the variable-length tail. **Continuous batching** admits new requests at every decode iteration as in-flight ones finish, keeping the GPU busy continuously. Critical for LLM throughput; supported by vLLM, TGI, TensorRT-LLM, SGLang.
+
+**Expansion / why this is the answer.**
+- See base T4 entry on continuous batching for the full discussion.
+- This entry is a quick contrast for an interviewer's "is your batching naive?" question.
+
+**Common follow-ups.**
+- "How much speedup?" → 2–5× in throughput on realistic workloads.
+
+**Common mistakes.**
+- Calling dynamic batching = continuous batching (related but different).
+
+**References.**
+- [Yu et al. — "Orca"](https://www.usenix.org/conference/osdi22/presentation/yu).
+- [Anyscale continuous batching blog](https://www.anyscale.com/blog/continuous-batching-llm-inference).
+
+---
+
+### Q: What's the "engine bucket" / "TensorRT compilation bucket" tradeoff?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tensorrt, compilation, shape-bucket]
+
+**Short answer.** TensorRT-LLM compiles kernels for *specific* input shapes (batch, seq-length) for max performance. A "bucket" is a (batch, max-seq-length) combination compiled once. More buckets = better shape coverage but more compile time and binary size. Production: a few buckets (e.g. batches 1, 4, 16, 32; seq-lengths 1k, 4k, 16k); fall back to dynamic shapes if outside.
+
+**Expansion / why this is the answer.**
+- **TensorRT compiles** per-shape; static shapes give best kernel selection.
+- **Buckets**: shape combinations you commit to compiling.
+- **Tradeoffs**:
+  - More buckets: better coverage; compile time and binary size grow.
+  - Dynamic-shape fallback: works for any shape but slower.
+- **Production pattern**: compile a handful of common buckets; route requests; dynamic-shape for outliers.
+- **vLLM is more flexible** (PyTorch-based) at the cost of some peak throughput.
+
+**Common follow-ups.**
+- "Why does vLLM not need buckets?" → It uses JIT-compiled PyTorch kernels; dynamic by design.
+- "When is TensorRT-LLM worth it?" → Stable, high-volume workloads where peak throughput matters and shape distribution is narrow.
+
+**Common mistakes.**
+- Over-bucketing; tens of buckets cost too much compile time.
+
+**References.**
+- [TensorRT-LLM documentation](https://github.com/NVIDIA/TensorRT-LLM).
+
+---
+
+### Q: What's the difference between throughput and goodput in LLM serving?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [throughput, goodput, slo-attainment]
+
+**Short answer.** **Throughput** = tokens generated per second by the system. **Goodput** = tokens delivered within SLO. A system can have high throughput but low goodput if the latency distribution has heavy tails (some requests slow). Optimizing for goodput is the production-relevant metric; throughput alone misses the SLO-violation tail.
+
+**Expansion / why this is the answer.**
+- **Throughput**: pure system measure; sum of all token output / time.
+- **Goodput**: tokens delivered to requests that *meet* their SLO (e.g. TTFT < 1s).
+- The gap: high-utilization batched serving often improves throughput at the cost of tail latency, dropping goodput.
+- **Operational practice**:
+  - Optimize for goodput, not raw throughput.
+  - Set SLOs first; size the cluster to keep p99 within.
+- **Distrib serving** (Splitwise, Mooncake) explicitly target goodput by separating prefill (latency for TTFT) from decode (throughput for TPOT).
+
+**Common follow-ups.**
+- "How do you measure goodput?" → SLO is defined per-request; count tokens delivered within SLO.
+- "Can goodput exceed throughput?" → No; goodput is a subset.
+
+**Common mistakes.**
+- Reporting throughput in benchmarks and ignoring the SLO failures it conceals.
+
+**References.**
+- [Qin et al. — "Mooncake"](https://arxiv.org/abs/2407.00079) — goodput discussion.
+
+---
+
+### Q: What is "speculative streaming" / EAGLE-2 / Eagle-3?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [eagle, speculative-decoding, draft-model]
+
+**Short answer.** EAGLE family (Li et al. 2024+): self-speculation methods that predict the *features* (hidden states) of future positions, not just tokens. EAGLE-2 adds adaptive draft tree shaping; EAGLE-3 improves acceptance rate further. Higher acceptance than Medusa or speculative decoding with a separate small draft model; comparable to MTP-trained models like DeepSeek-V3.
+
+**Expansion / why this is the answer.**
+- **Standard spec decode**: draft model predicts tokens; target verifies.
+- **EAGLE**: draft model predicts hidden states of the next positions; project to logits with the target model's LM head; verify.
+- **Advantages**:
+  - Predicting features is "easier" than predicting tokens directly (less collapse to top-1 token).
+  - Higher acceptance rate (often 70–90%).
+- **EAGLE-2** (Li et al. 2024): adaptive draft tree shape; explore more branches when uncertain.
+- **EAGLE-3** (Li et al. 2024): trained with multi-step feature prediction; improved acceptance further.
+- **Use in production**: vLLM, SGLang, TGI integrate EAGLE family.
+
+**Common follow-ups.**
+- "How does EAGLE compare to Medusa?" → Often better acceptance; Medusa is simpler to deploy but EAGLE wins on quality.
+- "Does this work with any base model?" → Yes; train the EAGLE head as a post-hoc addition.
+
+**Common mistakes.**
+- Calling EAGLE "lossy" — it's lossless (target distribution preserved by the verification step).
+
+**References.**
+- [Li et al. — "EAGLE"](https://arxiv.org/abs/2401.15077).
+- [Li et al. — "EAGLE-2"](https://arxiv.org/abs/2406.16858).
+
+---
+
+### Q: What is the role of the LLM router / model routing in production?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [router, model-routing, cascade]
+
+**Short answer.** A router decides which model handles each request: small cheap model for simple queries, big expensive model for hard ones. Saves cost at near-frontier quality. Routers can be rule-based (length, language detection), classifier-based (small ML model), or LLM-based (cheap LLM as decision-maker). RouteLLM (Ong et al. 2024) showed 85% cost reduction at near-frontier quality.
+
+**Expansion / why this is the answer.**
+- See T4 base entry on cascades for the deeper treatment.
+
+**Common follow-ups.**
+- "What signal trains the router?" → Logged data of (query, which model produced the better output) pairs; or quality-vs-cost scoring.
+
+**Common mistakes.**
+- Routing purely on length; semantic difficulty matters too.
+
+**References.**
+- [Ong et al. — "RouteLLM"](https://arxiv.org/abs/2406.18665).
+
+---
+
+### Q: What is "TGI inflight batching" vs vLLM continuous batching?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [tgi, vllm, batching]
+
+**Short answer.** Same concept, different names. TGI (Text Generation Inference, HuggingFace) calls its variant "inflight batching"; vLLM calls its "continuous batching." Both refer to per-iteration admission of new requests during decode. Implementation details differ (TGI has its own scheduler; vLLM has its own with paged attention) but the user-facing behavior is similar.
+
+**Expansion / why this is the answer.**
+- Pure terminology disambiguation.
+- See base continuous-batching entry.
+
+**Common follow-ups.**
+- "Is TGI's implementation as good?" → Historically vLLM has been ahead on features (paged attention, prefix caching); TGI has caught up over time.
+
+**References.**
+- [HuggingFace TGI](https://github.com/huggingface/text-generation-inference).
+- [vLLM project](https://github.com/vllm-project/vllm).
+
+---
+
+### Q: How does the batch size affect throughput vs. latency tradeoff?
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [batch-size, throughput-latency-tradeoff]
+
+**Short answer.** Larger batch: lower per-token cost (compute amortized over more tokens); higher per-request latency (more memory pressure, longer step time). Smaller batch: faster per-request response; higher cost per token. The sweet spot depends on workload: latency-sensitive UX prefers small batches; batch-processing workloads (offline summarization, evaluation) prefer large.
+
+**Expansion / why this is the answer.**
+- **The math**:
+  - Decode step time grows weakly with batch (memory-bound: weights are reread anyway, only KV traffic grows).
+  - Per-token cost ≈ step_time / batch_size — drops as batch grows.
+  - Per-request latency = step_time × number_of_decode_steps — rises slightly with batch (step time grows).
+- **At the sweet spot**:
+  - Batch around 32–64 for a 70B class model on H100.
+  - Beyond that: KV memory becomes the bottleneck; latency rises faster than throughput.
+- **Different for different workloads**:
+  - Interactive chat: small batches (4–16) for low latency.
+  - Batch jobs: large batches (32–256) for cost.
+- **Continuous batching** dynamically balances; the scheduler picks per-iteration.
+
+**Common follow-ups.**
+- "Why does increasing batch help so much in memory-bound regimes?" → The weight reads are amortized; only activation/KV reads grow.
+- "When does increasing batch hurt latency more than throughput?" → When you saturate compute (arithmetic intensity exceeds the roofline).
+
+**Common mistakes.**
+- Treating "batch size" as a fixed knob; it's dynamic in continuous batching.
+
+**References.**
+- [Pope et al. — "Efficiently Scaling Transformer Inference"](https://arxiv.org/abs/2211.05102).
+
+---
+
+### Q: What's the difference between RAM, VRAM, HBM, and GPU caches?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [memory-hierarchy, gpu-architecture]
+
+**Short answer.** **System RAM** (DDR4/5): CPU's main memory; ~100 GB/s. **VRAM = HBM** on modern GPUs: GPU's high-bandwidth memory; H100: 3.35 TB/s. **L2 cache** on GPU: ~50 MB; ~10 TB/s. **L1 / shared memory**: per-SM; ~200+ TB/s. The memory hierarchy is what makes FlashAttention's SRAM optimization meaningful — keeping data in fast on-chip memory saves HBM traffic.
+
+**Expansion / why this is the answer.**
+- **System RAM (DDR)**: CPU's working memory; ~100 GB/s on modern desktops; ~400 GB/s on server CPUs.
+- **PCIe**: link between CPU RAM and GPU; ~64 GB/s on PCIe Gen5 ×16. Bottleneck for CPU↔GPU transfer.
+- **VRAM (HBM)**:
+  - H100 80GB HBM3: 3.35 TB/s.
+  - H200 141GB HBM3e: 4.8 TB/s.
+  - The "main memory" of the GPU.
+- **L2 cache** (on GPU chip): 40-50 MB on H100; much faster than HBM.
+- **L1 / shared memory** (SRAM, per-SM): 228 KB per SM on H100; closest to compute.
+- **Registers**: fastest; per-thread.
+- **FlashAttention exploits this**: keep tiles in SRAM (L1/shared); operate; avoid round trips to HBM.
+
+**Common follow-ups.**
+- "Why does HBM bandwidth matter for LLM decode?" → Decode reads the full weight matrix every step; HBM traffic = bandwidth × step time.
+- "What's NVLink?" → Inter-GPU interconnect, ~900 GB/s per GPU in NVLink 4 (H100); much faster than PCIe but slower than HBM.
+
+**Common mistakes.**
+- Confusing GPU memory hierarchy with CPU's; the relative speeds are different.
+
+**References.**
+- [NVIDIA Hopper Architecture Whitepaper](https://resources.nvidia.com/en-us-tensor-core).
+
+---
+
+### Q: What is "weight offload" in LLM serving?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [offload, cpu-memory, large-models]
+
+**Short answer.** Weight offload moves model weights from GPU VRAM to CPU RAM (or disk); the weights are transferred to GPU on demand for each forward pass. Lets you run larger models than fit in VRAM, at huge latency cost. Useful for one-off inference, research, or batch jobs where latency is irrelevant. DeepSpeed-Inference and accelerate support this.
+
+**Expansion / why this is the answer.**
+- **Why**:
+  - You have a 70B model but only one H100 (80 GB).
+  - Weights: 140 GB in bf16; doesn't fit.
+  - Offload some/all to CPU RAM; transfer the needed weights at forward time.
+- **Performance hit**: PCIe at 64 GB/s vs HBM at 3.35 TB/s — orders-of-magnitude slowdown.
+- **For batch processing where latency doesn't matter**: usable; sequence forward through layer-by-layer, transferring weights ahead of compute.
+- **Production use**: rare; most serving stacks reject offload for latency reasons.
+- **Apple Silicon caveat**: unified memory means no offload needed at moderate scales.
+
+**Common follow-ups.**
+- "Disk offload?" → Even slower; only for one-off / research scenarios.
+- "FlexGen?" → A research framework specifically targeting offload-heavy serving.
+
+**Common mistakes.**
+- Trying offload for latency-sensitive workloads; the speed hit is brutal.
+
+**References.**
+- [DeepSpeed ZeRO-Inference](https://www.deepspeed.ai/inference/) — offload support.
+
+---
+
+### Q: What is grouped-query attention's KV-cache memory savings at concrete numbers?
+
+**Category:** derivation
+**Difficulty:** mid
+**Tags:** [gqa, kv-cache, derivation]
+
+**Short answer.** GQA-`g` (with `g` KV heads vs `h` query heads) reduces KV-cache memory by factor `h/g`. For LLaMA-3 70B: `h=64, g=8`, so 8× less KV memory than MHA. Concrete: 4k-context request KV = 1.3 GB (MHA) vs 160 MB (GQA-8). At batch 16, that's 21 GB vs 2.6 GB — the difference between fitting and not fitting on a single GPU.
+
+**Expansion / why this is the answer.**
+- See T4 GQA-derivation entry; this is a quick-recall concrete-numbers version.
+
+**Common follow-ups.**
+- "MQA vs GQA-1?" → Same thing.
+- "Why not GQA-1 in modern models?" → Quality drops more at GQA-1 than GQA-8 at the same model scale.
+
+**Common mistakes.**
+- Forgetting GQA only affects KV; Q is still `h` heads.
+
+**References.**
+- [Ainslie et al. — "GQA"](https://arxiv.org/abs/2305.13245).
+
+---
+
+### Q: What's the role of NVLink in distributed LLM training and serving?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [nvlink, interconnect, distributed]
+
+**Short answer.** NVLink: NVIDIA's high-bandwidth GPU-to-GPU interconnect. H100 NVLink 4: 900 GB/s per GPU (aggregate to other GPUs in the same node). Much faster than PCIe (~64 GB/s) or Infiniband (~50 GB/s). Critical for tensor parallelism (high all-reduce traffic) and expert-parallel MoE (all-to-all traffic). Used for intra-node communication; inter-node uses Infiniband.
+
+**Expansion / why this is the answer.**
+- **NVLink topology**:
+  - H100 SXM5: 4 NVLink 4.0 links per pair, 900 GB/s aggregate per GPU.
+  - HGX H100 8-GPU board: full mesh via NVSwitch.
+- **Distributed use**:
+  - **Tensor parallelism**: matmul-split requires all-reduce per layer; only feasible at NVLink speeds.
+  - **Expert parallelism (MoE)**: all-to-all token shuffle; NVLink critical.
+  - **Inter-node**: drops to Infiniband; tensor parallelism doesn't extend well across nodes.
+- **Practical guidance**:
+  - TP within a node (over NVLink).
+  - PP across nodes (over Infiniband).
+  - DP / FSDP can cross both.
+
+**Common follow-ups.**
+- "What's NVSwitch?" → A switch chip that fully connects 8 GPUs over NVLink within a node.
+- "Infiniband vs Ethernet?" → Infiniband: lower latency, more expensive; standard for HPC.
+
+**Common mistakes.**
+- Assuming TP scales across nodes; it doesn't at frontier speeds.
+
+**References.**
+- [NVIDIA NVLink documentation](https://www.nvidia.com/en-us/data-center/nvlink/).
+
+---
+
+### Q: What's the difference between Llama.cpp and vLLM for serving?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [llama-cpp, vllm, serving]
+
+**Short answer.** **llama.cpp**: CPU-first (with optional GPU backends); GGUF model format; designed for edge/local inference; uses memory-mapped quantized models. **vLLM**: GPU-first; paged attention; continuous batching; designed for cloud-scale serving. Same models, different deployment targets. Use llama.cpp for laptops/phones; vLLM for cloud servers.
+
+**Expansion / why this is the answer.**
+- **llama.cpp strengths**:
+  - Runs on CPU (and Apple Metal, CUDA, ROCm).
+  - GGUF format with INT4/INT8/etc quantization built-in.
+  - Memory-mapped models (large models on small RAM).
+  - Many community quantizations available.
+- **vLLM strengths**:
+  - Paged attention.
+  - Continuous batching.
+  - Multi-LoRA serving.
+  - Frontier-scale models.
+  - Production HTTP API.
+- **No overlap in target deployment**: serve at scale → vLLM; serve on a laptop → llama.cpp.
+
+**Common follow-ups.**
+- "GGUF vs safetensors?" → GGUF: llama.cpp-native, quantization-friendly. Safetensors: HuggingFace native, fp16/bf16.
+- "Can vLLM run on CPU?" → Limited; designed for GPU.
+
+**Common mistakes.**
+- Choosing llama.cpp for cloud-scale (terrible throughput).
+
+**References.**
+- [llama.cpp](https://github.com/ggerganov/llama.cpp).
+- [vLLM](https://github.com/vllm-project/vllm).
+
+---
+
+### Q: How would you load-test an LLM serving stack?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [load-testing, benchmarking, slo]
+
+**Short answer.** (1) Simulate realistic traffic: vary prompt length, output length, request rate, concurrent users. (2) Use a load-gen tool (Locust, k6, or LLM-specific like vLLM's `benchmark_serving.py`). (3) Measure: TTFT p50/p95/p99, TPOT p50/p95/p99, throughput, error rate, GPU utilization. (4) Sweep request rate to find SLO break-points. (5) Validate at sustained load (hours, not minutes) to catch slow leaks.
+
+**Expansion / why this is the answer.**
+- **Realistic traffic generation**:
+  - Sample prompt lengths from a distribution matching production.
+  - Sample output lengths similarly.
+  - Vary inter-arrival times (Poisson-like, with bursts).
+  - Vary concurrency (5, 20, 50, 100 concurrent users).
+- **Tools**:
+  - `vllm.entrypoints.benchmark_serving`: vLLM's official.
+  - `locust`: general-purpose HTTP load tester.
+  - `k6`: similar.
+  - `genai-perf` (NVIDIA): LLM-specific.
+- **Metrics to record**:
+  - Per-request: TTFT, TPOT, total latency.
+  - Aggregate: throughput, error rate.
+  - System: GPU memory, GPU util, CPU util.
+- **What to look for**:
+  - The point where p95 latency starts climbing — that's your SLO break.
+  - Memory leaks at sustained load.
+  - Queue length under burst.
+
+**Common follow-ups.**
+- "Synthetic vs replay?" → Replay is realistic but harder to script; synthetic gives controlled variation.
+- "Why measure p99 not just p50?" → User-impacting tail; p50 hides 1% disasters.
+
+**Common mistakes.**
+- Load-testing for 5 minutes; thermal / memory effects emerge after hours.
+
+**References.**
+- [vLLM benchmark_serving.py](https://github.com/vllm-project/vllm/blob/main/benchmarks/benchmark_serving.py).
+
+---
+
+### Q: What is "request priority" / SLO-aware scheduling?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [priority, slo, scheduling]
+
+**Short answer.** Production LLM serving distinguishes request priorities: interactive UI requests (tight SLO), agent loops (moderate), batch jobs (lax). The scheduler preempts low-priority requests' KV cache to make room for high-priority ones; evicts based on priority; routes based on SLO. Common in multi-tenant systems where one customer's batch job shouldn't starve another's chat.
+
+**Expansion / why this is the answer.**
+- **Priority levels**:
+  - **Interactive**: user typing in chat; TTFT < 500 ms required.
+  - **Background interactive**: agent's tool calls; ~2s OK.
+  - **Batch**: offline; minutes OK.
+- **Scheduler behavior**:
+  - Preempt batch to admit interactive.
+  - Reserve fraction of memory for high-priority.
+  - Use separate queues per priority.
+- **Tradeoffs**:
+  - Higher priority for some → starvation risk for batch jobs.
+  - Strict SLOs → idle capacity at low load (over-provisioning).
+
+**Common follow-ups.**
+- "How do you communicate priority?" → Per-request header / metadata; mapped to scheduler priority.
+- "Multi-tenant fair-share?" → Weighted round-robin or DRF (dominant resource fairness).
+
+**Common mistakes.**
+- One-size-fits-all scheduling; batch jobs slow interactive.
+
+**References.**
+- [Kwon et al. — "vLLM"](https://arxiv.org/abs/2309.06180).
+
+---
+
+### Q: What's RAGAS / RAG-eval specifically for serving?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [ragas, rag-eval, monitoring]
+
+**Short answer.** Not strictly serving — but production RAG systems use RAGAS-style continuous evaluation: sample 1% of traffic; LLM-judge faithfulness/relevance; alert on drift. Becomes part of the serving stack's quality monitoring. See T7 for the eval-side detail.
+
+**Expansion / why this is the answer.**
+- See base T7 RAGAS question.
+
+**Common follow-ups.**
+- "Why integrate eval into serving?" → Continuous quality tracking; catches regressions in real time.
+
+**References.**
+- [Es et al. — "RAGAS"](https://arxiv.org/abs/2309.15217).
+
+---
+
+### Q: How does multi-turn (chat) serving differ from single-turn?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [multi-turn, chat, kv-cache, session]
+
+**Short answer.** Multi-turn chat re-uses the conversation history: each turn appends user message + assistant response to the context. Serving efficiency depends on **prefix caching** — the prior turns' KV cache is reused, only the new tokens are processed. Sessions sometimes spread across hours; the scheduler must decide when to evict idle sessions' KV.
+
+**Expansion / why this is the answer.**
+- **Per-turn flow**:
+  - Turn N: prior context + new user message → prefill new tokens (using cached prior) → decode response.
+  - The cached KV from turn N-1 is the prefix.
+- **Without prefix caching**: every turn re-prefills the entire context — quadratic cost over many turns.
+- **With prefix caching**: each turn only prefills the new user message; the LM head decodes the new assistant tokens.
+- **Session management**:
+  - When to evict: TTL (e.g. 10 min idle), memory pressure.
+  - Re-population: re-prefill from raw history when needed.
+- **Modern APIs**:
+  - Anthropic / OpenAI prompt-caching APIs: explicit cache control.
+
+**Common follow-ups.**
+- "Connection to stateless serving?" → If you don't cache, each turn re-prefills; works but expensive.
+- "What's the typical session length distribution?" → Heavy-tailed; most short, some very long (debugging sessions, research chats).
+
+**Common mistakes.**
+- Treating chat as stateless and re-prefilling every turn.
+
+**References.**
+- [Kwon et al. — "vLLM"](https://arxiv.org/abs/2309.06180) — prefix caching.
+- [Anthropic — Prompt Caching docs](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching).
+
+---
+
+### Q: How does CPU offload help in serving 405B+ models?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [cpu-offload, large-models, latency]
+
+**Short answer.** CPU offload stages parts of the model in CPU RAM and transfers to GPU on-demand. For a 405B model that doesn't fit in 8× H100 in bf16 even with TP, offloading some layers / weights to CPU RAM lets the model run, at order-of-magnitude latency cost. Used for research / batch / one-off serving where latency is irrelevant. Production: usually quantize to INT4 instead.
+
+**Expansion / why this is the answer.**
+- Already covered above in weight-offload entry; this is a model-specific framing.
+
+**Common follow-ups.**
+- "When is offload preferred over quantization?" → Almost never in production; quantization gives much better latency at modest quality cost.
+
+**References.**
+- [DeepSpeed ZeRO-Inference](https://www.deepspeed.ai/inference/).
+
+---
+
+### Q: What's the difference between "online serving" and "batch inference"?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [online, batch, inference-modes]
+
+**Short answer.** **Online serving**: low-latency real-time inference per request; SLOs in milliseconds-to-seconds; high throughput needed. **Batch inference**: process a large set of inputs offline; latency irrelevant; throughput-only. Different stacks: vLLM/TensorRT-LLM/SGLang for online; same stacks or simpler scripts for batch (no need for continuous batching, no SLO).
+
+**Expansion / why this is the answer.**
+- **Online**:
+  - Per-request latency matters.
+  - Variable load; need capacity planning.
+  - Standard chat / API workloads.
+- **Batch**:
+  - Process N inputs; report N outputs.
+  - Process in a single large batch (or chunks).
+  - No SLO; can run overnight.
+  - Examples: bulk classification, summarization, embedding generation for a large corpus.
+- **Why both stacks**:
+  - Online needs continuous batching for adaptive load.
+  - Batch can use simpler static batching.
+
+**Common follow-ups.**
+- "Cost difference?" → Batch is ~5–10× cheaper per token (better utilization, simpler stack, no idle capacity).
+- "Anthropic Batch API / OpenAI Batch API?" → Explicitly: 50% discount in exchange for 24h SLA.
+
+**Common mistakes.**
+- Using an online stack for a batch job; misses the cost savings.
+
+**References.**
+- [OpenAI Batch API docs](https://platform.openai.com/docs/guides/batch).
+- [Anthropic Batch API docs](https://docs.anthropic.com/en/docs/build-with-claude/batch-processing).
+
+---
+
+### Q: What is "thinking-time" / "test-time compute" scaling at inference?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [test-time-compute, o1, reasoning, inference]
+
+**Short answer.** Modern reasoning models (o1-style, DeepSeek-R1, Claude Extended Thinking) trade inference compute for quality by generating long internal "thinking" traces before the final answer. Inference cost rises by 5–100×; quality on reasoning tasks rises substantially. Production tradeoff: when reasoning matters more than latency/cost, enable thinking; when latency matters, disable.
+
+**Expansion / why this is the answer.**
+- **The pattern**:
+  - Model emits a long "thinking" trace internally.
+  - Then emits the final answer.
+  - Both consume tokens; user only sees the final answer in some APIs.
+- **Cost implications**:
+  - Token count: thinking can be 10×–100× the final answer.
+  - Inference cost scales accordingly.
+- **Quality**:
+  - Reasoning benchmarks (GPQA, MATH, ARC-AGI) improve substantially with more thinking.
+  - Diminishing returns past a point.
+- **APIs**:
+  - OpenAI o1/o3: thinking budget controllable.
+  - Anthropic Extended Thinking: explicit thinking-budget parameter.
+  - DeepSeek-R1: thinking visible by default.
+- **Production**: route easy queries to non-thinking models; thinking for hard ones.
+
+**Common follow-ups.**
+- "When does thinking not help?" → Simple lookup, classification, short factual recall.
+- "How is this related to chain-of-thought?" → CoT is the prompt-level analog; thinking models train the model to do this internally.
+
+**Common mistakes.**
+- Enabling thinking universally; massive cost increase for many queries that don't need it.
+
+**References.**
+- [OpenAI — o1 system card](https://openai.com/index/openai-o1-system-card/).
+- [Anthropic — Extended Thinking docs](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking).
+- [DeepSeek-R1 paper](https://arxiv.org/abs/2501.12948).
+
+---
+
+### Q: How does "structured output" affect serving performance?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [structured-output, fsm, grammar]
+
+**Short answer.** Constrained generation (JSON, regex, grammar) adds per-step masking of the logits via a finite-state machine, costing ~µs per step. Net effect: minimal latency overhead; slightly fewer effective compute steps (model can sometimes generate longer rejections). Modern FSM-based implementations (Outlines, xGrammar) are well-optimized; rarely the bottleneck.
+
+**Expansion / why this is the answer.**
+- See T4 base structured-generation entry.
+
+**Common follow-ups.**
+- "Performance penalty?" → Negligible with xGrammar.
+- "Quality penalty?" → Yes; sometimes meaningful if grammar is restrictive.
+
+**References.**
+- [Dong et al. — "XGrammar"](https://arxiv.org/abs/2411.15100).
+
+---
+
+### Q: What's the role of mixed-batch prefill in modern servers?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [mixed-batch, prefill, decode]
+
+**Short answer.** Modern servers run prefill and decode steps *in the same forward pass* — mixed-batch. A single iteration may include: prefill chunks for one or two new requests, decode steps for many in-flight ones. Improves GPU utilization (avoids switching between prefill-only and decode-only kernels) and decouples per-request progress. Sarathi-Serve (Agrawal et al. 2024) and later vLLM versions support this.
+
+**Expansion / why this is the answer.**
+- **The problem with separating phases**:
+  - Pure-decode iterations: low arithmetic intensity; under-utilize compute.
+  - Pure-prefill iterations: high latency; block streaming.
+- **Mixed batch solution**:
+  - Each iteration: bundle prefill chunks + decode positions into one forward pass.
+  - Schedule prefill chunks to fill compute slack during decode.
+- **Implementation**: attention kernel must handle variable shapes within a single batch (varlen FlashAttention supports this).
+
+**Common follow-ups.**
+- "How is this different from disaggregation?" → Mixed batch keeps everything on one GPU pool; disaggregation has separate pools.
+- "Does this work with paged attention?" → Yes; paged attention handles the variable shapes.
+
+**Common mistakes.**
+- Treating prefill and decode as separate kernels; modern stacks fuse.
+
+**References.**
+- [Agrawal et al. — "Sarathi-Serve"](https://arxiv.org/abs/2403.02310).
+
+---
+
+### Q: What's "warmup" in LLM serving?
+
+**Category:** concept
+**Difficulty:** intro
+**Tags:** [warmup, cold-start, kernel-compilation]
+
+**Short answer.** First-request latency is often much higher than steady-state because of (a) kernel JIT compilation (PyTorch, TensorRT), (b) CUDA Graphs capture, (c) memory pre-allocation. Production serving warms up the engine with dummy requests at startup so first real requests don't pay the cold-start tax. Standard practice; usually 1–5 dummy requests cover the common shape buckets.
+
+**Expansion / why this is the answer.**
+- **What gets compiled / cached on first run**:
+  - PyTorch JIT'd kernels.
+  - TensorRT engine selection.
+  - CUDA Graphs capture (per shape bucket).
+  - Memory allocator warmup.
+- **Cold-start cost**: 100s of ms to seconds.
+- **Mitigation**:
+  - Warmup script: send dummy prompts of representative shapes at startup.
+  - Probe-then-serve: don't accept real traffic until warmup completes.
+
+**Common follow-ups.**
+- "Does cloud auto-scaling preserve warmup?" → Each new instance pays the cold-start cost; pre-warm in the readiness probe.
+- "Why does this matter for serverless LLM?" → Cold-starts can be unacceptable for interactive UX.
+
+**Common mistakes.**
+- Reporting "first-request latency" as production-typical.
+
+**References.**
+- [TensorRT-LLM documentation](https://github.com/NVIDIA/TensorRT-LLM).
+
+---
+
+### Q: How does vLLM's chunked prefill work specifically?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [chunked-prefill, vllm, sarathi]
+
+**Short answer.** vLLM's chunked prefill (since v0.5): split long prefills into chunks (e.g. 512 tokens) processed across multiple scheduler iterations. Each iteration's batch can mix one chunk of prefill from a new request with decode steps for other requests. Inspired by Sarathi-Serve; controlled by `--max-num-batched-tokens`.
+
+**Expansion / why this is the answer.**
+- See T4 base chunked-prefill entry.
+
+**Common follow-ups.**
+- "Default chunk size?" → 512 tokens typical.
+- "Does it help in single-request workloads?" → No; only multi-tenant.
+
+**References.**
+- [vLLM docs — chunked prefill](https://docs.vllm.ai/en/latest/).
+
+---
+
+### Q: What is "tensor parallelism degree" choice based on?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [tp-degree, distributed, model-parallel]
+
+**Short answer.** TP degree (number of GPUs the model is split across) is chosen to make the model fit while keeping intra-node NVLink as the dominant communication path. For a 70B model in bf16 (140 GB): TP=2 on 2× H100 fits. For 405B (810 GB bf16): TP=8 on 8× H100. Choose TP = ceil(model_size / per_gpu_memory) — minimal degree that fits.
+
+**Expansion / why this is the answer.**
+- **The math**:
+  - Per-GPU memory budget = (GPU VRAM - KV cache - activations - overhead).
+  - TP=N spreads weights across N GPUs.
+  - Per-GPU weight footprint = total_weights / N.
+- **Communication scaling**:
+  - TP-N has ~`(N-1)/N` of the all-reduce bandwidth.
+  - Beyond 8 GPUs (one NVLink-connected node), bandwidth drops sharply; cross-node TP rarely worthwhile.
+- **Recipe**:
+  - Pick smallest TP that fits.
+  - If still doesn't fit at TP=8 (one node), use TP=8 + PP across nodes.
+
+**Common follow-ups.**
+- "Why not always TP=8?" → More TP = more communication overhead. Smaller TP is faster if you can fit.
+- "Pipeline parallelism across nodes?" → Yes; common at 405B+ scale.
+
+**Common mistakes.**
+- Picking TP based on convenience rather than fit; either wastes memory or fails to fit.
+
+**References.**
+- [Shoeybi et al. — "Megatron-LM"](https://arxiv.org/abs/1909.08053).
+
+---
+
+### Q: What is "GPU sharing" / fractional GPU?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [gpu-sharing, mig, time-sharing]
+
+**Short answer.** Two ways: (1) **MIG (Multi-Instance GPU)**: NVIDIA's hardware partitioning — split one A100/H100 into multiple isolated instances (e.g. 7×A100-10G). Each looks like a smaller GPU. (2) **Time-sharing**: multiple processes share the same GPU; the driver schedules. MIG is for strict isolation; time-sharing is for opportunistic use. For LLM serving, MIG is rare because models often need the full GPU.
+
+**Expansion / why this is the answer.**
+- **MIG**:
+  - A100 supports up to 7 instances of different memory configs.
+  - Strong isolation: separate memory, separate compute SMs.
+  - Useful for serving many small models.
+- **Time-sharing**:
+  - Default CUDA behavior: kernels from multiple processes interleave.
+  - No memory isolation; processes share VRAM.
+  - Risk: one process OOMs, another fails.
+- **For LLM serving**:
+  - Modern LLMs typically saturate a full GPU; MIG less useful.
+  - Multi-LoRA on one base model: shares the GPU efficiently without MIG (logical multi-tenancy in the serving layer).
+
+**Common follow-ups.**
+- "Is MIG used in production for LLMs?" → Rare; most production LLMs use full GPUs.
+- "How does Kubernetes share GPUs?" → MIG, time-sharing, or nvidia-plugin abstractions.
+
+**Common mistakes.**
+- Assuming MIG helps for serving one big LLM; it just makes the GPU smaller.
+
+**References.**
+- [NVIDIA MIG documentation](https://www.nvidia.com/en-us/technologies/multi-instance-gpu/).
+
+---
+
+### Q: What is "compile-once, run-many" in TensorRT-LLM?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [tensorrt, compilation, deployment]
+
+**Short answer.** TensorRT-LLM compiles a model + shape buckets into an optimized engine file once (takes minutes). The engine then loads quickly and runs efficiently. Production deploys the compiled engine, not the model source. Re-compilation needed when shapes change, GPU type changes, or model is updated.
+
+**Expansion / why this is the answer.**
+- Compile time: minutes for a 7B model; tens of minutes for 70B.
+- Engine output: optimized binary, GPU-architecture-specific (different for A100 vs H100).
+- Re-deploy: ship the engine + a runtime; no PyTorch model needed at serve time.
+- Iteration cost: re-compile when needed; CI/CD pipeline handles this.
+
+**Common follow-ups.**
+- "Why not JIT like vLLM?" → Slightly less optimized; vLLM trades some peak perf for flexibility.
+- "Does ONNX Runtime work like this?" → Yes; similar AOT-compile pattern.
+
+**Common mistakes.**
+- Re-compiling at every deploy; wastes time.
+
+**References.**
+- [TensorRT-LLM docs](https://github.com/NVIDIA/TensorRT-LLM).
+
+---
+
+### Q: What's "cache reuse" across different requests with similar contexts?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [cache-reuse, semantic-cache]
+
+**Short answer.** Two senses: (1) **KV-cache reuse** (exact-prefix matching; see prefix caching). (2) **Semantic cache** (e.g. GPTCache): hash the *semantic content* of the prompt; if a previous prompt is semantically similar, return its cached response. The second is application-level, not infrastructure; trades response freshness for cost.
+
+**Expansion / why this is the answer.**
+- **KV-cache reuse**: token-level, exact-match — infrastructure layer.
+- **Semantic cache**: query-level, semantic-match — application layer.
+  - Embed the prompt; lookup in a vector store of past `(prompt_embedding, response)` pairs.
+  - If similarity > threshold, return cached response.
+  - GPTCache, Redis-with-vectors, custom solutions.
+- **Tradeoff**:
+  - Cost savings: 0 LLM calls for cache hits.
+  - Quality risk: cached response might not be perfect for the slightly-different new prompt.
+  - Freshness risk: the cached response may be stale if the underlying data has changed.
+- **When to use**:
+  - FAQ-style apps with high prompt repetition.
+  - Cost-sensitive workloads.
+
+**Common follow-ups.**
+- "Semantic threshold?" → 0.85–0.95 cosine typical; tune by acceptable hit rate.
+- "Why not always use semantic cache?" → Cache hits are wrong sometimes; user notices.
+
+**Common mistakes.**
+- Treating semantic cache as a free win; quality is at risk.
+
+**References.**
+- [GPTCache project](https://github.com/zilliztech/GPTCache).
+
+---
+
+### Q: How does Mooncake's KV-cache pool work?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [mooncake, kv-pool, disaggregated]
+
+**Short answer.** Mooncake (Qin et al. 2024, Moonshot AI): a disaggregated LLM serving system that includes a centralized KV-cache pool (across nodes), allowing prefill and decode nodes to share cache fragments. Optimizes for high prefix-cache hit rate at scale. Reported 75% lower cost than collocated baselines.
+
+**Expansion / why this is the answer.**
+- **Architecture**:
+  - Prefill pool (compute-heavy GPUs).
+  - Decode pool (memory-bandwidth-heavy GPUs).
+  - **Centralized KV pool** in shared memory (CPU RAM + RDMA-attached NVMe).
+  - Prefill writes KV to the pool; decode reads from it.
+- **Why this matters**:
+  - At very large scale, KV reuse across requests pays for the transport cost.
+  - Decoupling prefill and decode pools lets each scale independently.
+- **Performance** (Mooncake paper): 75% cost reduction vs. collocated under specific workloads.
+
+**Common follow-ups.**
+- "Is this in production?" → Moonshot AI uses it; Mooncake-style pooling is a research direction; not yet OSS-standard.
+- "Tradeoff with paged attention?" → Different: paged is intra-GPU; KV pool is cross-GPU/cross-node.
+
+**Common mistakes.**
+- Treating KV-cache pool as universal; only justified at large scale with heavy prefix reuse.
+
+**References.**
+- [Qin et al. — "Mooncake"](https://arxiv.org/abs/2407.00079).
+
+---
+
+### Q: What is "KV cache transfer" cost in disaggregated serving?
+
+**Category:** derivation
+**Difficulty:** senior
+**Tags:** [kv-transfer, disaggregated, networking]
+
+**Short answer.** Transferring a KV cache between prefill and decode nodes costs `seq_len × KV_per_token` bytes over the interconnect. For Llama 3 70B GQA-8 at 16k context: ~5 GB per request. Over PCIe Gen5 (64 GB/s) or RDMA Infiniband (200 Gbps = 25 GB/s), transfer time is 0.2–1 second — significant. Justifies disaggregation only at high load where prefill/decode contention costs more.
+
+**Expansion / why this is the answer.**
+- **Math**: KV per token (Llama 3 70B GQA-8, bf16) = 320 KB. At 16k context: 16k × 320 KB = 5 GB.
+- **Transfer paths**:
+  - **PCIe Gen5 ×16**: 64 GB/s; transfer in ~80 ms.
+  - **Infiniband HDR (200 Gbps)**: 25 GB/s; ~200 ms.
+  - **NVLink intra-rack**: 900 GB/s; ~5 ms.
+- **Trade-off**:
+  - Cost: 5–500 ms of added latency per request.
+  - Benefit: avoid prefill/decode contention.
+- Worth it when contention adds more than transfer time saves.
+
+**Common follow-ups.**
+- "FP8 / INT8 KV?" → Linear reduction in transfer size.
+- "Why is intra-rack so much faster?" → NVLink between racks via NVSwitch.
+
+**Common mistakes.**
+- Ignoring transfer cost; it's substantial.
+
+**References.**
+- [Patel et al. — "Splitwise"](https://arxiv.org/abs/2311.18677).
+- [Qin et al. — "Mooncake"](https://arxiv.org/abs/2407.00079).
+
+---
+
+### Q: What is "decode-time pruning" of KV cache?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [kv-pruning, h2o, decode]
+
+**Short answer.** During decode, identify and evict less-important KV-cache entries to bound memory. Methods: **H2O** (Zhang et al. 2023) keeps "heavy hitters" (high-attention tokens); **SnapKV** (Li et al. 2024) selects relevant tokens once at the start of generation. Quality cost is modest; memory savings can be 5–10×. Useful for very long contexts where KV memory is the binding constraint.
+
+**Expansion / why this is the answer.**
+- The intuition: most tokens in a long context receive little attention; we can drop their KV without much quality loss.
+- **H2O** (Zhang et al. 2023): "heavy hitter oracle" — keep top-K by accumulated attention score.
+- **SnapKV** (Li et al. 2024): observe attention patterns over the first N decode steps; permanently drop low-attention tokens.
+- **StreamingLLM** (Xiao et al. 2024): keep attention sinks + sliding window.
+- **Quality cost**: typically <5pt on benchmarks at 5× KV reduction; rises sharply at 10×+.
+
+**Common follow-ups.**
+- "How does this interact with prefix caching?" → Pruned tokens lose their cache value; needs care.
+- "Is this lossless?" → No — pruning is approximate.
+
+**Common mistakes.**
+- Treating KV pruning as lossless.
+
+**References.**
+- [Zhang et al. — "H2O"](https://arxiv.org/abs/2306.14048).
+- [Li et al. — "SnapKV"](https://arxiv.org/abs/2404.14469).
+
+---
+
+### Q: What is "JIT vs AOT compilation" for LLM kernels?
+
+**Category:** concept
+**Difficulty:** mid
+**Tags:** [jit, aot, compilation]
+
+**Short answer.** **JIT (Just-In-Time)**: kernels compiled at runtime when first called (PyTorch eager + torch.compile). Flexible, slower startup. **AOT (Ahead-Of-Time)**: kernels compiled before deployment (TensorRT, ONNX Runtime). Faster startup, less flexible. Tradeoff: AOT for stable production; JIT for development and dynamic workloads.
+
+**Expansion / why this is the answer.**
+- **JIT**:
+  - PyTorch eager + `torch.compile` (Triton-backed).
+  - Compiles on first call; cached for subsequent.
+  - Easy to iterate; fewer deployment artifacts.
+- **AOT**:
+  - TensorRT, ONNX Runtime.
+  - Compile to optimized engine file.
+  - Shipped with the application.
+  - Specific to GPU architecture; needs recompile per target.
+- **vLLM**: primarily JIT.
+- **TensorRT-LLM**: AOT.
+
+**Common follow-ups.**
+- "torch.compile?" → PyTorch's JIT entry; falls back to eager on graph breaks.
+- "Production preference?" → Depends; many use vLLM (JIT) for flexibility; TensorRT-LLM (AOT) for peak perf.
+
+**Common mistakes.**
+- Forgetting AOT engines are GPU-architecture-specific.
+
+**References.**
+- [PyTorch torch.compile docs](https://pytorch.org/docs/stable/torch.compiler.html).
+
+---
+
+### Q: How does inference benefit from sparsity / pruning?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [sparsity, pruning, deja-vu]
+
+**Short answer.** **Structured sparsity** (2:4 NVIDIA pattern, channel pruning) gives real speedup on modern GPUs (~2× for 2:4). **Unstructured sparsity** rarely gives speedup on dense hardware. **Dynamic / runtime sparsity** (Déjà Vu, Liu et al. 2023): predict which MLP neurons activate per token; skip the rest — gives speedup at inference. Net: sparsity helps when the hardware supports it.
+
+**Expansion / why this is the answer.**
+- **Static structured sparsity**:
+  - NVIDIA 2:4 pattern (every 4 weights have 2 zeros).
+  - Tensor cores natively support; ~2× throughput.
+  - Compatible with quantization.
+- **Unstructured sparsity**:
+  - Random zeros; doesn't map to GPU tensor cores; rarely speeds up.
+- **Dynamic sparsity (Déjà Vu)**:
+  - Predict which FFN neurons / attention heads contribute meaningfully per token.
+  - Skip the others.
+  - Speedups 2–5× on FFN-dominated forward pass.
+- **MoE is dynamic sparsity** at the expert granularity.
+
+**Common follow-ups.**
+- "Compatibility with quantization?" → Yes; sparsity + INT4 stacks.
+- "Production use?" → 2:4 sparsity on some NVIDIA stacks; Déjà Vu-style not yet standard.
+
+**Common mistakes.**
+- Pruning randomly; doesn't translate to throughput.
+
+**References.**
+- [Liu et al. — "Déjà Vu"](https://arxiv.org/abs/2310.17157).
+- [NVIDIA 2:4 sparsity guide](https://developer.nvidia.com/blog/accelerating-inference-with-sparsity-using-ampere-and-tensorrt/).
+
+---
+
+### Q: How does ZeRO-3 inference work vs ZeRO-3 training?
+
+**Category:** concept
+**Difficulty:** senior
+**Tags:** [zero-inference, deepspeed]
+
+**Short answer.** ZeRO-3 inference (DeepSpeed-Inference): parameters sharded across GPUs; gather on demand per layer for forward pass; re-shard. Memory: per-GPU = `total / N`. Latency cost: gather adds communication per layer. Compared to TP: ZeRO-3 sharding doesn't split matmuls (so each GPU runs the whole layer in turn); TP splits matmuls (so all GPUs work in parallel). TP is faster; ZeRO-3 inference is more memory-flexible.
+
+**Expansion / why this is the answer.**
+- **TP inference**: matmul-split across GPUs; full parallelism per layer.
+- **ZeRO-3 inference**: parameter-shard; gather to one GPU per layer (or sub-batch); compute; re-shard.
+- **Latency**: TP wins for throughput; ZeRO-3 wins for the largest models that don't fit even with TP.
+- **Use case**: ZeRO-3 inference rare in production; mostly research / batch.
+
+**Common follow-ups.**
+- "Why is ZeRO-3 slower?" → Communication for each layer; less parallelism.
+- "FSDP inference?" → Similar to ZeRO-3 inference; not common.
+
+**Common mistakes.**
+- Treating ZeRO-3 as universally optimal; for inference, TP usually wins.
+
+**References.**
+- [DeepSpeed-Inference docs](https://www.deepspeed.ai/inference/).
+
+---
