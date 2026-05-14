@@ -532,6 +532,57 @@ button.danger:hover { text-decoration: underline; }
   text-align: center;
 }
 
+/* ===== Custom scrollbars ===== */
+/* Firefox */
+.sidebar, .filter-list, .md pre, .mcq-options, textarea {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-soft) transparent;
+}
+/* WebKit (Chrome / Edge / Safari) */
+.sidebar::-webkit-scrollbar,
+.filter-list::-webkit-scrollbar,
+.md pre::-webkit-scrollbar,
+.mcq-options::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.sidebar::-webkit-scrollbar-track,
+.filter-list::-webkit-scrollbar-track,
+.md pre::-webkit-scrollbar-track,
+.mcq-options::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb,
+.filter-list::-webkit-scrollbar-thumb,
+.md pre::-webkit-scrollbar-thumb,
+.mcq-options::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.sidebar::-webkit-scrollbar-thumb:hover,
+.filter-list::-webkit-scrollbar-thumb:hover,
+.md pre::-webkit-scrollbar-thumb:hover,
+.mcq-options::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-soft);
+  background-clip: padding-box;
+}
+/* Hide the up/down arrow buttons that older WebKit / some Windows builds show */
+.sidebar::-webkit-scrollbar-button,
+.filter-list::-webkit-scrollbar-button,
+.md pre::-webkit-scrollbar-button,
+.mcq-options::-webkit-scrollbar-button,
+textarea::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 900px) {
   .view { grid-template-columns: 1fr; }
