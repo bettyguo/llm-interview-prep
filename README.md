@@ -54,12 +54,12 @@ If you don't know which plan fits you, start with the 8-week and skip what you a
 
 <!-- BUILD:STATS:START -->
 
-**Total questions:** 0
+**Total questions:** 31
 
 | # | Topic | Questions |
 |---|-------|-----------|
-| 1 | 01 — ML & DL Fundamentals | 0 |
-| 2 | 02 — Transformers & LLM Internals | 0 |
+| 1 | 01 — ML & DL Fundamentals | 15 |
+| 2 | 02 — Transformers & LLM Internals | 16 |
 | 3 | 03 — Training & Fine-Tuning | 0 |
 | 4 | 04 — Inference & Serving | 0 |
 | 5 | 05 — Retrieval & RAG | 0 |
