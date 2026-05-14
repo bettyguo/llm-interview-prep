@@ -446,7 +446,7 @@ The most-asked topic in 2026 AI interview loops. Entries follow the [Q&A schema]
 - Information at position `i - w - k` can still influence position `i` after `k` layers, because each layer's window slides — like a CNN with kernel size `w`. The effective receptive field grows with depth, but signal is diluted.
 - **Longformer** (Beltagy et al. 2020): mix of local sliding window + global attention for select "anchor" tokens (e.g. `[CLS]`).
 - **Mistral 7B** (Jiang et al. 2023): pure SWA with `w = 4096` and a context of 8192 tokens; uses RoPE; KV cache capped at the window.
-- **Hybrid choices** in 2024–2026 frontier models: alternate SWA layers with full-attention layers (Mistral 7B v0.3, Mixtral); some use SWA only in early layers.
+- **Hybrid choices** in 2024–2026 frontier models: alternate local-attention layers with full-attention layers — Gemma 2 (Google) interleaves sliding-window and global-attention layers explicitly; the original Mistral 7B used pure SWA but its later checkpoints (v0.2+) and Mixtral dropped SWA in favor of full attention.
 - Failure mode: tasks requiring direct attention to far-away tokens (e.g. needle-in-haystack at the prompt start) degrade — though Mistral's results showed SWA-only models still recover most long-range info via depth.
 
 **Common follow-ups.**
