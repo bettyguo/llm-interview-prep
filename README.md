@@ -5,8 +5,6 @@
 # llm-interview-prep
 
 [![License: content CC-BY-4.0 / tooling MIT](https://img.shields.io/badge/license-CC--BY--4.0%20%2F%20MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/bettyguo/llm-interview-prep/actions/workflows/ci.yml/badge.svg)](https://github.com/bettyguo/llm-interview-prep/actions/workflows/ci.yml)
-[![Linkcheck](https://github.com/bettyguo/llm-interview-prep/actions/workflows/linkcheck.yml/badge.svg)](https://github.com/bettyguo/llm-interview-prep/actions/workflows/linkcheck.yml)
 [![Last updated](https://img.shields.io/github/last-commit/bettyguo/llm-interview-prep?label=last%20updated)](https://github.com/bettyguo/llm-interview-prep/commits/main)
 [![Stars](https://img.shields.io/github/stars/bettyguo/llm-interview-prep?style=social)](https://github.com/bettyguo/llm-interview-prep/stargazers)
 
