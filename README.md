@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/banner.svg" alt="llm-interview-prep banner" width="100%"/>
-</p>
-
 # llm-interview-prep
 
 [![Live demo](https://img.shields.io/badge/live%20demo-bettyguo.github.io%2Fllm--interview--prep-6f4e37?logo=githubpages&logoColor=white)](https://bettyguo.github.io/llm-interview-prep/)
