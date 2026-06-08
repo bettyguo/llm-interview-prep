@@ -124,17 +124,6 @@ This repo sits beside three peer repos. Each owns a distinct noun; none is paren
 
 ---
 
-## Curator
-
-**Betty Guo** ([Dongxin Guo](https://bettyguo.github.io)), PhD candidate in Computer Science at [The University of Hong Kong](https://www.cs.hku.hk/), advised by [Prof. Siu-Ming Yiu](https://www.cs.hku.hk/people/academic-staff/smyiu).
-
-- ORCID: [0009-0000-2388-1072](https://orcid.org/0009-0000-2388-1072)
-- Research focus: trustworthy AI, reliable AI systems, LLM agents, retrieval-augmented systems, LLM theory.
-
-This repo grew out of preparing for my own industry interviews while finishing a PhD, and noticing that nothing on GitHub unified the full 2026 AI-interview stack in one place. It's released under CC-BY-4.0 so anyone can adapt it for cohorts, study groups, or bootcamps; please attribute.
-
----
-
 ## Contributing
 
 PRs welcome. The contract: every new concept/derivation/system-design answer carries at least one authoritative reference. The validator enforces this. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [PR template](.github/PULL_REQUEST_TEMPLATE.md).
@@ -148,16 +137,9 @@ Common contributions:
 
 ## Maintenance
 
-Quarterly content review; weekly automated link check; CHANGELOG updated per release. The 2026 LLM landscape drifts fast — staleness is a known risk; visible maintenance is the mitigation.
-
-## Star history
-
-[![Star History Chart](https://api.star-history.com/svg?repos=bettyguo/llm-interview-prep&type=Date)](https://star-history.com/#bettyguo/llm-interview-prep&Date)
+Quarterly content review; shceduled automated link check; CHANGELOG updated per release. The 2026 LLM landscape drifts fast — staleness is a known risk; visible maintenance is the mitigation.
 
 ## License
 
 Content: [CC-BY-4.0](LICENSE) · Tooling: [MIT](LICENSE).
 
----
-
-<p align="center"><sub>Curated by <a href="https://github.com/bettyguo">Betty Guo</a> · University of Hong Kong · 2026.</sub></p>
